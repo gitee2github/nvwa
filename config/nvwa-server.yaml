@@ -1,0 +1,4 @@
+criu_dir: /home/anatasluo/criu/
+criu_exe: /usr/sbin/criu
+kexec_exe: /usr/sbin/kexec
+systemd_etc: /etc/systemd/system/
