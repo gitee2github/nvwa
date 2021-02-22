@@ -2,13 +2,16 @@ package main
 
 import (
 	log "github.com/sirupsen/logrus"
-	"os/exec"
 	"io"
+	"os/exec"
 	"strings"
 	"sync"
 )
 
 func runCmd(cmd string, args []string, stdin io.Reader, stdout, stderr io.Writer) (error, string) {
+	var retVal []byte
+	var err error
+
 	command := exec.Command(cmd, args...)
 	if stdin != nil {
 		command.Stdin = stdin
@@ -19,7 +22,12 @@ func runCmd(cmd string, args []string, stdin io.Reader, stdout, stderr io.Writer
 	if stderr != nil {
 		command.Stderr = stderr
 	}
-	retVal, err := command.Output()
+
+	if stdout != nil {
+		err = command.Run()
+	} else {
+		retVal, err = command.Output()
+	}
 	if err != nil {
 		log.Errorf("Run command %s failed, error is %s \n", command.Args, err)
 		return err, ""
