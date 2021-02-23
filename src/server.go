@@ -1,16 +1,18 @@
 package main
 
 import (
+	"errors"
 	"fmt"
+	"github.com/ankur-anand/simple-go-rpc/src/server"
+	"github.com/fsnotify/fsnotify"
 	ps "github.com/keybase/go-ps"
 	log "github.com/sirupsen/logrus"
-	"github.com/ankur-anand/simple-go-rpc/src/server"
 	"github.com/spf13/viper"
 	"os"
+	"path"
 	"strconv"
 	"strings"
 	"sync"
-	"path"
 )
 
 var exitServer chan bool
@@ -22,7 +24,7 @@ func overrideSystemctl(service string) {
 	criuExe := nvwaSeverConfig.GetString("criu_exe")
 	systemdEtc := nvwaSeverConfig.GetString("systemd_etc")
 
-	systemdDir := path.Join(systemdEtc, service, ".service.d")
+	systemdDir := path.Join(systemdEtc, service+".service.d")
 	_ = os.Mkdir(systemdDir, 0700)
 
 	f, err := os.Create(path.Join(systemdDir, "override.conf"))
@@ -79,7 +81,7 @@ func findPids(criuPids map[string]int) {
 	for x := range processList {
 		process := processList[x]
 		pid, ok := criuPids[process.Executable()]
-		if ok && (pid == -1 || process.Pid() < pid){
+		if ok && (pid == -1 || process.Pid() < pid) {
 			criuPids[process.Executable()] = process.Pid()
 		}
 	}
@@ -91,6 +93,12 @@ func UpdateImage(ver string) (int, error) {
 	criuDir := nvwaSeverConfig.GetString("criu_dir")
 	criuExe := nvwaSeverConfig.GetString("criu_exe")
 	kexecExe := nvwaSeverConfig.GetString("kexec_exe")
+
+	if criuDir == "" {
+		log.Errorf("Missing criuDir settings in config file \n")
+		return 0, errors.New("Missing criuDir settings in config file")
+	}
+
 	findPids(criuPids)
 
 	// dump process memory
@@ -112,7 +120,7 @@ func UpdateImage(ver string) (int, error) {
 	_ = os.Mkdir(configDir, 0700)
 
 	DumpAllNet(configDir)
-	
+
 	// update kexec image
 	err, _ := runCmd(kexecExe, []string{"-l", "/boot/vmlinuz-" + ver,
 		"--initrd", "/boot/initramfs-" + ver + ".img"}, nil, nil, nil)
@@ -149,9 +157,13 @@ func readConfig(curConfig *viper.Viper, name string) {
 	if err != nil {
 		panic(fmt.Errorf("Load config %s failed, %s \n", name, err))
 	}
+	curConfig.WatchConfig()
+	curConfig.OnConfigChange(func(e fsnotify.Event) {
+		log.Errorf("Config file changed: please restart the server", e.Name)
+	})
 }
 
-func loadConfig()  {
+func loadConfig() {
 	nvwaSeverConfig = viper.New()
 	nvwaRestoreConfig = viper.New()
 	readConfig(nvwaSeverConfig, "nvwa-server")
@@ -171,10 +183,10 @@ func RestoreProcess(ver string) (int, error) {
 		wg.Add(1)
 		go waitCmd(criuExe, []string{"restore", "-D", criuDir + "/" + val,
 			"-o", "restore.log", "--tcp-established", "--ext-unix-sk", "--shell-job",
-			"--daemon", "-vv"}, &wg, nil, nil, nil)
+			"--daemon", "-vv"}, &wg, os.Stdin, os.Stdout, os.Stderr)
 	}
 	wg.Wait()
-	log.Debugf("Restore processes successfully")
+	log.Debugf("Restore processes finish")
 	return 0, nil
 }
 
@@ -198,5 +210,5 @@ func startServer(ip, port string, mode int) {
 		go RestoreProcess("")
 	}
 	log.Debugf("Server is running in ip %s with port %s \n", ip, port)
-	<- exitServer
+	<-exitServer
 }

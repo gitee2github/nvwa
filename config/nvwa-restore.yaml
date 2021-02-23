@@ -1,4 +1,2 @@
 pids:
-  - redis-server
 services:
-  - criu_test

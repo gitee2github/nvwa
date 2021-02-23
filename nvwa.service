@@ -1,0 +1,15 @@
+[Unit]
+Description=NVWA server
+After=network.target auditd.service
+
+[Service]
+ExecStart=/usr/bin/nvwa -mode 2
+ExecReload=/usr/bin/nvwa -mode 1
+ExecReload=/bin/kill -HUP $MAINPID
+KillMode=process
+Restart=on-failure
+Type=notify
+
+[Install]
+WantedBy=multi-user.target
+Alias=nvwa.service

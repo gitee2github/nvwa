@@ -14,11 +14,11 @@ func dumpNet(cmd, path string) {
 		return
 	}
 	defer file.Close()
-	runCmd("ip", []string{cmd, "dump"}, nil, file, nil)
+	runCmd("ip", []string{cmd, "save"}, nil, file, nil)
 }
 
 func restoreNet(cmd, path string) {
-	file, err := os.Create(path)
+	file, err := os.Open(path)
 	if err != nil {
 		log.Errorf("Unable to create file %s, error is %s \n", path, err)
 		return
@@ -62,13 +62,14 @@ func DumpIptables(path string) {
 }
 
 func RestoreIptables(path string) {
-	file, err := os.Create(path)
+	log.Debugf("Load net path %s \n", path)
+	file, err := os.Open(path)
 	if err != nil {
 		log.Errorf("Unable to create file %s, error is %s \n", path, err)
 		return
 	}
 	defer file.Close()
-	runCmd("iptables-restore", []string{"-c", "--noflush"}, nil, file, nil)
+	runCmd("iptables-restore", []string{"-c", "--noflush"}, file, nil, nil)
 }
 
 func DumpAllNet(dirPath string) {

@@ -29,21 +29,16 @@ func startClient(ip, port string) {
 	log.SetLevel(log.DebugLevel)
 	app := &cli.App{
 		Name:     "nvwa",
-		Usage:    "a tool used for openEuler kernel update",
+		Usage:    "a tool used for openEuler kernel update.",
 		Version:  "0.0.1",
 		Compiled: time.Now(),
 		Commands: []*cli.Command{
 			{
-				Name:  "config",
-				Usage: "show server config info",
-				Action: func(c *cli.Context) error {
-					return nil
-				},
-			},
-			{
 				Name:  "check",
 				Usage: "check kexec and criu version",
 				Action: func(c *cli.Context) error {
+					// When build rpm package, rpmbuild will check requires, no more need here
+					log.Debugf("Check satisfied\n")
 					return nil
 				},
 			},
