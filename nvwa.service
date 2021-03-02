@@ -5,10 +5,11 @@ After=network.target auditd.service
 [Service]
 ExecStart=/usr/bin/nvwa -mode 2
 ExecReload=/usr/bin/nvwa -mode 1
-ExecReload=/bin/kill -HUP $MAINPID
+User=root
+Group=root
 KillMode=process
 Restart=on-failure
-Type=notify
+Type=forking
 
 [Install]
 WantedBy=multi-user.target

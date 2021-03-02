@@ -27,7 +27,7 @@ func overrideSystemctl(service string) {
 	systemdDir := path.Join(systemdEtc, service+".service.d")
 	_ = os.Mkdir(systemdDir, 0700)
 
-	f, err := os.Create(path.Join(systemdDir, "override.conf"))
+	f, err := os.Create(path.Join(systemdDir, "nvwa_override.conf"))
 	if err != nil {
 		log.Errorf("Unable to create file for %s, err is %s \n", service, err)
 		return
@@ -47,6 +47,13 @@ func overrideSystemctl(service string) {
 	}
 }
 
+func overrideServiceConfig() {
+	services := nvwaRestoreConfig.GetStringSlice("services")
+	for _, val := range services {
+		overrideSystemctl(val)
+	}
+}
+
 // with same process name, use the minimum pid
 func findPids(criuPids map[string]int) {
 	pidNames := nvwaRestoreConfig.GetStringSlice("pids")
@@ -56,6 +63,7 @@ func findPids(criuPids map[string]int) {
 
 	services := nvwaRestoreConfig.GetStringSlice("services")
 	for _, val := range services {
+		criuPids[val] = -1
 		err, tmpRet := runCmd("systemctl", []string{"show", "--property",
 			"MainPID", "--value", val}, nil, nil, nil)
 		if err != nil {
@@ -64,11 +72,10 @@ func findPids(criuPids map[string]int) {
 		}
 		ret, err := strconv.Atoi(strings.TrimSpace(tmpRet))
 		if err != nil || ret == 0 {
-			log.Errorf("Unable to get pid for service, err is %s, ret is %d \n", err, ret)
+			log.Errorf("Unable to get pid for service %s, err is %s, ret is %d \n", val, err, ret)
 			continue
 		}
 		criuPids[val] = ret
-		overrideSystemctl(val)
 		log.Debugf("Get pid %d for service %s \n", criuPids[val], val)
 	}
 
@@ -89,6 +96,8 @@ func findPids(criuPids map[string]int) {
 
 func UpdateImage(ver string) (int, error) {
 	var wg sync.WaitGroup
+	total := 0
+	success := 0
 	criuPids := make(map[string]int)
 	criuDir := nvwaSeverConfig.GetString("criu_dir")
 	criuExe := nvwaSeverConfig.GetString("criu_exe")
@@ -105,20 +114,27 @@ func UpdateImage(ver string) (int, error) {
 	for key, value := range criuPids {
 		if value == -1 {
 			log.Errorf("Unable to find pid for " + key)
-			continue
+			return 0, errors.New("Unable to find pid for " + key)
 		}
 		dirPath := path.Join(criuDir, key)
 		_ = os.Mkdir(dirPath, 0700)
 		wg.Add(1)
+		total ++
 		go waitCmd(criuExe, []string{"dump", "-D", dirPath,
 			"-t", strconv.Itoa(value), "-o", "dump.log", "--tcp-established", "--ext-unix-sk",
-			"--shell-job", "--daemon", "-vv"}, &wg, nil, nil, nil)
+			"--shell-job", "--daemon", "-j", "-vv"}, &wg, nil, nil, nil, &success)
 	}
 	wg.Wait()
+	log.Debugf("%d:%d process(es) dump successfully\n", success, total)
+
+	if success < total {
+		return 0, errors.New("Some processes dump failed. \n")
+	}
 
 	configDir := path.Join(criuDir, "config")
 	_ = os.Mkdir(configDir, 0700)
 
+	overrideServiceConfig()
 	DumpAllNet(configDir)
 
 	// update kexec image
@@ -172,21 +188,33 @@ func loadConfig() {
 
 func RestoreProcess(ver string) (int, error) {
 	var wg sync.WaitGroup
+	total := 0
+	success := 0
 	criuDir := nvwaSeverConfig.GetString("criu_dir")
 	criuExe := nvwaSeverConfig.GetString("criu_exe")
 
-	configDir := path.Join(criuDir, "config")
-	RestoreAllNet(configDir)
+	enableNet := nvwaRestoreConfig.GetBool("restore_net")
+	if enableNet {
+		configDir := path.Join(criuDir, "config")
+		RestoreAllNet(configDir)
+	}
 
 	pidNames := nvwaRestoreConfig.GetStringSlice("pids")
 	for _, val := range pidNames {
+		path := criuDir + "/" + val
+		if _, err := os.Stat(path); os.IsNotExist(err) {
+			continue
+		}
+
 		wg.Add(1)
-		go waitCmd(criuExe, []string{"restore", "-D", criuDir + "/" + val,
+		total ++
+		go waitCmd(criuExe, []string{"restore", "-D", path,
 			"-o", "restore.log", "--tcp-established", "--ext-unix-sk", "--shell-job",
-			"--daemon", "-vv"}, &wg, os.Stdin, os.Stdout, os.Stderr)
+			"--daemon", "-j", "-vv"}, &wg, os.Stdin, os.Stdout, os.Stderr, &success)
 	}
+	log.Debugf("Wait criu runs finished \n")
 	wg.Wait()
-	log.Debugf("Restore processes finish")
+	log.Debugf("%d:%d process(es) restore suceessfully. \n", success, total)
 	return 0, nil
 }
 

@@ -20,10 +20,11 @@ func dumpNet(cmd, path string) {
 func restoreNet(cmd, path string) {
 	file, err := os.Open(path)
 	if err != nil {
-		log.Errorf("Unable to create file %s, error is %s \n", path, err)
+		log.Errorf("Unable to Open file %s, error is %s \n", path, err)
 		return
 	}
 	defer file.Close()
+	log.Debugf("Load net config file %s. \n", path)
 	runCmd("ip", []string{cmd, "restore"}, file, nil, nil)
 }
 
@@ -80,9 +81,12 @@ func DumpAllNet(dirPath string) {
 }
 
 func RestoreAllNet(dirPath string) {
+	if _, err := os.Stat(dirPath); os.IsNotExist(err) {
+		return
+	}
+	RestoreIptables(path.Join(dirPath, "iptables"))
 	RestoreIfaddr(path.Join(dirPath, "addr"))
 	RestoreRoute(path.Join(dirPath, "route"))
 	RestoreRule(path.Join(dirPath, "rule"))
-	RestoreIptables(path.Join(dirPath, "iptables"))
 }
 

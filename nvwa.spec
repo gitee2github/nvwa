@@ -1,6 +1,6 @@
 Name:           nvwa
 Version:        0.0.1
-Release:        1
+Release:        2
 Summary:        a tool used for openEuler kernel update
 
 License:        MulanPSL-2.0 and Apache-2.0 and MIT
@@ -30,8 +30,8 @@ cd -
 
 mkdir -p %{buildroot}/%{_bindir}
 mkdir -p %{buildroot}/etc/%{name}
-mkdir -p %{buildroot}/etc/%{name}/running/
-mkdir -p %{buildroot}/etc/systemd/system/
+mkdir -p %{buildroot}/etc/%{name}/running
+mkdir -p %{buildroot}/etc/systemd/system
 
 install -m 0750 %{_builddir}/%{name}-v%{version}/src/%{name} %{buildroot}/%{_bindir}/
 install -m 0640 %{_builddir}/%{name}-v%{version}/config/%{name}-restore.yaml %{buildroot}/etc/%{name}/
@@ -51,6 +51,7 @@ install -m 0644 %{_builddir}/%{name}-v%{version}/%{name}.service %{buildroot}/et
 %files
 %license LICENSE
 %dir /etc/%{name}/
+%dir /etc/%{name}/running
 /etc/%{name}/%{name}-restore.yaml
 /etc/%{name}/%{name}-server.yaml
 /etc/systemd/system/%{name}.service
