@@ -49,14 +49,23 @@ go build
 
     显示server相关的帮助信息
 
++ nvwa init
+
+    删除nvwa产生的镜像和对service的修改
+
+## 关于恢复service的局限
+
++ service的标准输出和错误输出必须设置成文件
++ service恢复可能存在pid占用的错误
+
+## 查看nvwa运行日志
+
+> service nvwa status
+
 #### 开发计划
 
 + 将/boot目录下kernel和rootfs的命名格式放入配置项
 + 支持日志重定向至文件
 + 配置文件改变后，服务自动重新加载
-+ server必须以root权限运行
 + server/client帮助文本的问题
-+ 优化使用体验
-+ 配置文件存在模糊的地方
-+ nvwa的启动时机存在一定问题(criu对lsm之类存在依赖)
-+ 网络dump/restore变成可选(否则会造成开机网络失效)
++ rpc框架非正式应用，示范用的程序，考虑重写或者自己维护

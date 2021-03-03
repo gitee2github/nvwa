@@ -3,54 +3,59 @@ package main
 import (
 	"errors"
 	"fmt"
-	"github.com/ankur-anand/simple-go-rpc/src/server"
-	"github.com/fsnotify/fsnotify"
-	ps "github.com/keybase/go-ps"
-	log "github.com/sirupsen/logrus"
-	"github.com/spf13/viper"
 	"os"
 	"path"
 	"strconv"
 	"strings"
 	"sync"
+	"io/ioutil"
+
+	"github.com/ankur-anand/simple-go-rpc/src/server"
+	"github.com/fsnotify/fsnotify"
+	ps "github.com/keybase/go-ps"
+	log "github.com/sirupsen/logrus"
+	"github.com/spf13/viper"
 )
 
 var exitServer chan bool
 var nvwaSeverConfig *viper.Viper
 var nvwaRestoreConfig *viper.Viper
 
-func overrideSystemctl(service string) {
-	criuDir := nvwaSeverConfig.GetString("criu_dir")
-	criuExe := nvwaSeverConfig.GetString("criu_exe")
+func overrideConf(path string, content string) {
+	f, err := os.Create(path)
+	if err != nil {
+		log.Errorf("Unable to create file %s, err is %s \n", path, err)
+		return
+	}
+	defer f.Close()
+
+	_, err = f.WriteString(content)
+	if err != nil {
+		log.Errorf("Unable to write file %s, err is %s \n", path, err)
+		return
+	}
+}
+
+func overrideSystemctl(service string, pid int) {
 	systemdEtc := nvwaSeverConfig.GetString("systemd_etc")
 
 	systemdDir := path.Join(systemdEtc, service+".service.d")
 	_ = os.Mkdir(systemdDir, 0700)
 
-	f, err := os.Create(path.Join(systemdDir, "nvwa_override.conf"))
-	if err != nil {
-		log.Errorf("Unable to create file for %s, err is %s \n", service, err)
-		return
-	}
-	defer f.Close()
+	content := "[Service]\nExecStart=\nExecStart="
+	content += "nvwa restore " + service + " " + strconv.Itoa(pid) + "\n"
+	content += "User=root\nGroup=root\n"
+	overrideConf(path.Join(systemdDir, "nvwa_override_exec.conf"), content)
 
-	_, err = f.WriteString("[Service]\nExecStart=\nExecStart=")
-	if err != nil {
-		log.Errorf("Unable to write file for %s, err is %s \n", service, err)
-		return
-	}
-
-	_, err = f.WriteString(criuExe + " restore" + " -D " + path.Join(criuDir, service) + " -o restore.log --tcp-established --ext-unix-sk --shell-job --daemon -vv")
-	if err != nil {
-		log.Errorf("Unable to write file for %s, err is %s \n", service, err)
-		return
-	}
+	content = "[Unit]\nAfter=nvwa.service network-online.target\n"
+	content += "[Service]\nRestart=no\n"
+	overrideConf(path.Join(systemdDir, "nvwa_override_restart.conf"), content)
 }
 
-func overrideServiceConfig() {
+func overrideServiceConfig(criuPids map[string]int) {
 	services := nvwaRestoreConfig.GetStringSlice("services")
 	for _, val := range services {
-		overrideSystemctl(val)
+		overrideSystemctl(val, criuPids[val])
 	}
 }
 
@@ -94,6 +99,64 @@ func findPids(criuPids map[string]int) {
 	}
 }
 
+func removeOverrideSystemctl(service string) error {
+	systemdEtc := nvwaSeverConfig.GetString("systemd_etc")
+	systemdDir := path.Join(systemdEtc, service+".service.d")
+
+	err := os.Remove(path.Join(systemdDir, "nvwa_override_exec.conf"))
+	if err != nil {
+		log.Errorf("Unable to remove exec service file for %s err %s \n", service, err)
+		return err
+	}
+
+	err = os.Remove(path.Join(systemdDir, "nvwa_override_restart.conf"))
+	if err != nil {
+		log.Errorf("Unable to remove restart service file for %s err %s \n", service, err)
+		return err
+	}
+
+	return nil
+}
+
+func removePidImage(psName string) error {
+	criuDir := nvwaSeverConfig.GetString("criu_dir")
+	err := os.RemoveAll(path.Join(criuDir, psName))
+	if err != nil {
+		log.Errorf("Unable to remove dump dirctory for %s err %s \n", psName, err)
+		return err
+	}
+	return nil
+}
+
+func removeAllOverrideSys() {
+	services := nvwaRestoreConfig.GetStringSlice("services")
+	for _, val := range services {
+		removeOverrideSystemctl(val)
+	}
+}
+
+func removeAllPids() {
+	pidNames := nvwaRestoreConfig.GetStringSlice("pids")
+	for _, val := range pidNames {
+		removePidImage(val)
+	}
+}
+
+func InitEnv(env string) (int, error) {
+	removeAllOverrideSys()
+	removeAllPids()
+	return 0, nil
+}
+
+func loadCmdline() (string, error) {
+	data, err := ioutil.ReadFile("/proc/cmdline")
+	if err != nil {
+		log.Errorf("Unable to read cmdline, error is %s \n", err)
+		return "", err
+	}
+	return string(data), err
+}
+
 func UpdateImage(ver string) (int, error) {
 	var wg sync.WaitGroup
 	total := 0
@@ -110,6 +173,7 @@ func UpdateImage(ver string) (int, error) {
 
 	findPids(criuPids)
 
+	overrideServiceConfig(criuPids)
 	// dump process memory
 	for key, value := range criuPids {
 		if value == -1 {
@@ -119,7 +183,7 @@ func UpdateImage(ver string) (int, error) {
 		dirPath := path.Join(criuDir, key)
 		_ = os.Mkdir(dirPath, 0700)
 		wg.Add(1)
-		total ++
+		total++
 		go waitCmd(criuExe, []string{"dump", "-D", dirPath,
 			"-t", strconv.Itoa(value), "-o", "dump.log", "--tcp-established", "--ext-unix-sk",
 			"--shell-job", "--daemon", "-j", "-vv"}, &wg, nil, nil, nil, &success)
@@ -128,18 +192,25 @@ func UpdateImage(ver string) (int, error) {
 	log.Debugf("%d:%d process(es) dump successfully\n", success, total)
 
 	if success < total {
-		return 0, errors.New("Some processes dump failed. \n")
+		removeAllOverrideSys()
+		return 0, errors.New("Some processes dump failed.\n")
 	}
 
+	
 	configDir := path.Join(criuDir, "config")
 	_ = os.Mkdir(configDir, 0700)
 
-	overrideServiceConfig()
 	DumpAllNet(configDir)
 
+	cmdline, err := loadCmdline()
+	if err != nil {
+		return 0, err
+	}
+
 	// update kexec image
-	err, _ := runCmd(kexecExe, []string{"-l", "/boot/vmlinuz-" + ver,
-		"--initrd", "/boot/initramfs-" + ver + ".img"}, nil, nil, nil)
+	err, _ = runCmd(kexecExe, []string{"-q", "/boot/vmlinuz-" + ver,
+		"--initrd", "/boot/initramfs-" + ver + ".img", "--append="+cmdline},
+		nil, nil, nil)
 	if err != nil {
 		log.Errorf("Unable to load kernel image, err is %s \n", err)
 		return 0, err
@@ -186,7 +257,23 @@ func loadConfig() {
 	readConfig(nvwaRestoreConfig, "nvwa-restore")
 }
 
-func RestoreProcess(ver string) (int, error) {
+func RestoreService(service string) (int, error) {
+	criuExe := nvwaSeverConfig.GetString("criu_exe")
+	criuDir := nvwaSeverConfig.GetString("criu_dir")
+
+	err, _ := runCmd(criuExe, []string{"restore", "-D", path.Join(criuDir, service),
+		"-o", "restore.log", "--tcp-established", "--ext-unix-sk",
+		"--shell-job", "--daemon", "-j", "-vv"}, nil, nil, nil)
+	if (err != nil) {
+		log.Errorf("Restore %s failed, error is %s \n", service, err)
+		return 0, err
+	}
+	log.Debugf("Restore service %s successfully \n", service)
+	removeOverrideSystemctl(service)
+	return 0, nil
+}
+
+func RestoreProcess() {
 	var wg sync.WaitGroup
 	total := 0
 	success := 0
@@ -207,7 +294,7 @@ func RestoreProcess(ver string) (int, error) {
 		}
 
 		wg.Add(1)
-		total ++
+		total++
 		go waitCmd(criuExe, []string{"restore", "-D", path,
 			"-o", "restore.log", "--tcp-established", "--ext-unix-sk", "--shell-job",
 			"--daemon", "-j", "-vv"}, &wg, os.Stdin, os.Stdout, os.Stderr, &success)
@@ -215,28 +302,36 @@ func RestoreProcess(ver string) (int, error) {
 	log.Debugf("Wait criu runs finished \n")
 	wg.Wait()
 	log.Debugf("%d:%d process(es) restore suceessfully. \n", success, total)
-	return 0, nil
+	return
 }
 
 func runServer(ip, port string) {
 	addr := ip + ":" + port
 	srv := server.NewServer(addr)
 	srv.Register("update", UpdateImage)
-	srv.Register("restore", RestoreProcess)
+	srv.Register("restore", RestoreService)
 	srv.Register("exit", ExitServer)
 	srv.Register("echo", EchoMsg)
+	srv.Register("init", InitEnv)
 	go srv.Run()
 }
 
 func startServer(ip, port string, mode int) {
+	var wg sync.WaitGroup
 	log.SetLevel(log.DebugLevel)
 	exitServer = make(chan bool)
 
 	loadConfig()
 	runServer(ip, port)
+	NotifySytemd()
 	if mode == 2 {
-		go RestoreProcess("")
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			RestoreProcess()
+		}()
 	}
+	wg.Wait()
 	log.Debugf("Server is running in ip %s with port %s \n", ip, port)
 	<-exitServer
 }

@@ -52,7 +52,7 @@ func startClient(ip, port string) {
 						log.WithFields(log.Fields{
 							"ip":        ip,
 							"port":      port,
-							"parameter": c.Args().First(),
+							"version":	 c.Args().First(),
 						}).Errorf("Execute update cmd exit with ret %d and error %s \n", ret, err)
 					}
 					return err
@@ -60,14 +60,35 @@ func startClient(ip, port string) {
 			},
 			{
 				Name:  "restore",
-				Usage: "restore previous running environment",
+				Usage: "restore service",
 				Action: func(c *cli.Context) error {
-					ret, err := sendCmdToServer(ip, port, "restore", "")
+					ret, err := sendCmdToServer(ip, port, "restore", c.Args().First())
+					log.Debugf("Resore service %s \n", c.Args().First())
+					if err != nil {
+						log.WithFields(log.Fields{
+							"ip":   	ip,
+							"port": 	port,
+							"service": 	c.Args().First(),
+							"pid": 		c.Args().Get(1),
+						}).Errorf("Execute restore cmd exit with ret %d and error %s \n", ret, err)
+						return err
+					}
+					RestoreMainPid(c.Args().Get(1))
+					NotifySytemd()
+					SystemdReload()
+					return err
+				},
+			},
+			{
+				Name:  "init",
+				Usage: "init nvwa running environment",
+				Action: func(c *cli.Context) error {
+					ret, err := sendCmdToServer(ip, port, "init", "")
 					if err != nil {
 						log.WithFields(log.Fields{
 							"ip":   ip,
 							"port": port,
-						}).Errorf("Execute restore cmd exit with ret %d and error %s \n", ret, err)
+						}).Errorf("Execute init cmd exit with ret %d and error %s \n", ret, err)
 					}
 					return err
 				},

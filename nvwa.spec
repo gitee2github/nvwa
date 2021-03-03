@@ -31,6 +31,7 @@ cd -
 mkdir -p %{buildroot}/%{_bindir}
 mkdir -p %{buildroot}/etc/%{name}
 mkdir -p %{buildroot}/etc/%{name}/running
+mkdir -p %{buildroot}/etc/%{name}/log
 mkdir -p %{buildroot}/etc/systemd/system
 
 install -m 0750 %{_builddir}/%{name}-v%{version}/src/%{name} %{buildroot}/%{_bindir}/
@@ -52,6 +53,7 @@ install -m 0644 %{_builddir}/%{name}-v%{version}/%{name}.service %{buildroot}/et
 %license LICENSE
 %dir /etc/%{name}/
 %dir /etc/%{name}/running
+%dir /etc/%{name}/log
 /etc/%{name}/%{name}-restore.yaml
 /etc/%{name}/%{name}-server.yaml
 /etc/systemd/system/%{name}.service
