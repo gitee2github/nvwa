@@ -37,7 +37,10 @@ func runCmd(cmd string, args []string, stdin io.Reader, stdout, stderr io.Writer
 	return nil, tmpRet
 }
 
-func waitCmd(cmd string, args []string, wg *sync.WaitGroup, stdin io.Reader, stdout, stderr io.Writer) (error, string) {
+func waitCmd(cmd string, args []string, wg *sync.WaitGroup, stdin io.Reader, stdout, stderr io.Writer, count *int) {
 	defer wg.Done()
-	return runCmd(cmd, args, stdin, stdout, stderr)
+	err, _ := runCmd(cmd, args, stdin, stdout, stderr)
+	if err == nil {
+		*count ++
+	}
 }
