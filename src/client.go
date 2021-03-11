@@ -30,7 +30,7 @@ func startClient(ip, port string) {
 	app := &cli.App{
 		Name:     "nvwa",
 		Usage:    "a tool used for openEuler kernel update.",
-		Version:  "0.0.1",
+		Version:  "0.1",
 		Compiled: time.Now(),
 		Commands: []*cli.Command{
 			{

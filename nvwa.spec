@@ -1,6 +1,6 @@
 Name:           nvwa
-Version:        0.0.1
-Release:        2
+Version:        0.1
+Release:        1
 Summary:        a tool used for openEuler kernel update
 
 License:        MulanPSL-2.0 and Apache-2.0 and MIT
