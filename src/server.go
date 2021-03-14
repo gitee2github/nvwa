@@ -1,25 +1,37 @@
 package main
 
 import (
-	"errors"
 	"fmt"
+	"io/ioutil"
+	"net"
 	"os"
 	"path"
+	"reflect"
+	"runtime"
 	"strconv"
 	"strings"
 	"sync"
-	"io/ioutil"
 
-	"github.com/ankur-anand/simple-go-rpc/src/server"
 	"github.com/fsnotify/fsnotify"
-	ps "github.com/keybase/go-ps"
 	log "github.com/sirupsen/logrus"
 	"github.com/spf13/viper"
 )
 
+type rpmFunc func(string) int
+
 var exitServer chan bool
+var rpmList = map[string]rpmFunc{}
 var nvwaSeverConfig *viper.Viper
 var nvwaRestoreConfig *viper.Viper
+
+func registerRPC(cmd string, rpc rpmFunc) {
+	if v, e := rpmList[cmd]; e {
+		log.Errorf("%s exist with func %s \n", cmd,
+			runtime.FuncForPC(reflect.ValueOf(v).Pointer()).Name())
+		return
+	}
+	rpmList[cmd] = rpc
+}
 
 func overrideConf(path string, content string) {
 	f, err := os.Create(path)
@@ -59,44 +71,71 @@ func overrideServiceConfig(criuPids map[string]int) {
 	}
 }
 
-// with same process name, use the minimum pid
-func findPids(criuPids map[string]int) {
+func getPidName(pid string) (string, error) {
+	data, err := ioutil.ReadFile("/proc/" + pid + "/cmdline")
+	if err != nil {
+		log.Errorf("Unable to find name for pid %s \n", pid)
+		log.Errorf("Error is %s \n", err)
+		return "", err
+	}
+	names := strings.Split(strings.TrimSuffix(string(data), "\n"), "/")
+	name := names[len(names) - 1]
+	if len(name) == 0 {
+		name = pid
+	}
+	name = strings.Replace(name, "\x00", "", -1)
+	log.Debugf("Find name %s for pid %s", name, pid)
+	return name, nil
+}
+
+func findPids(criuPids map[string]int) error {
 	pidNames := nvwaRestoreConfig.GetStringSlice("pids")
 	for _, val := range pidNames {
-		criuPids[val] = -1
+		pid, err := strconv.Atoi(val)
+		if err != nil {
+			log.Errorf("Unable to get pid from %s \n", val)
+			log.Errorf("Error is %s \n", err)
+			return err
+		}
+		_, err = getPidName(val)
+		if err != nil {
+			return err
+		}
+		criuPids[val] = pid
 	}
 
 	services := nvwaRestoreConfig.GetStringSlice("services")
 	for _, val := range services {
-		criuPids[val] = -1
 		err, tmpRet := runCmd("systemctl", []string{"show", "--property",
 			"MainPID", "--value", val}, nil, nil, nil)
 		if err != nil {
-			log.Errorf("Unable to get pid for service %s, err is %s \n", val, err)
-			continue
+			log.Errorf("Unable to get pid for service %s\n", val)
+			log.Errorf("Error is %s \n", err)
+			return err
 		}
 		ret, err := strconv.Atoi(strings.TrimSpace(tmpRet))
-		if err != nil || ret == 0 {
-			log.Errorf("Unable to get pid for service %s, err is %s, ret is %d \n", val, err, ret)
-			continue
+		if err != nil {
+			if ret == 0 {
+				err = fmt.Errorf("Unable to get pid for service %s, error is %s, ret is %d \n",
+					val, err, ret)
+			}
+			log.Errorf("%s \n", err)
+			return err
 		}
 		criuPids[val] = ret
 		log.Debugf("Get pid %d for service %s \n", criuPids[val], val)
 	}
+	return nil
+}
 
-	processList, err := ps.Processes()
+func removePidImage(psName string) error {
+	criuDir := nvwaSeverConfig.GetString("criu_dir")
+	err := os.RemoveAll(path.Join(criuDir, psName))
 	if err != nil {
-		log.Errorf("Unable to find processes, err is %s", err)
-		return
+		log.Errorf("Unable to remove dump dirctory for %s err %s \n", psName, err)
+		return err
 	}
-
-	for x := range processList {
-		process := processList[x]
-		pid, ok := criuPids[process.Executable()]
-		if ok && (pid == -1 || process.Pid() < pid) {
-			criuPids[process.Executable()] = process.Pid()
-		}
-	}
+	return nil
 }
 
 func removeOverrideSystemctl(service string) error {
@@ -115,17 +154,7 @@ func removeOverrideSystemctl(service string) error {
 		return err
 	}
 
-	return nil
-}
-
-func removePidImage(psName string) error {
-	criuDir := nvwaSeverConfig.GetString("criu_dir")
-	err := os.RemoveAll(path.Join(criuDir, psName))
-	if err != nil {
-		log.Errorf("Unable to remove dump dirctory for %s err %s \n", psName, err)
-		return err
-	}
-	return nil
+	return removePidImage(service)
 }
 
 func removeAllOverrideSys() {
@@ -142,10 +171,11 @@ func removeAllPids() {
 	}
 }
 
-func InitEnv(env string) (int, error) {
+func InitEnv(env string) int {
+	log.Debugf("Init Env \n")
 	removeAllOverrideSys()
 	removeAllPids()
-	return 0, nil
+	return 0
 }
 
 func loadCmdline() (string, error) {
@@ -154,10 +184,10 @@ func loadCmdline() (string, error) {
 		log.Errorf("Unable to read cmdline, error is %s \n", err)
 		return "", err
 	}
-	return string(data), err
+	return strings.TrimSuffix(string(data), "\n"), err
 }
 
-func UpdateImage(ver string) (int, error) {
+func UpdateImage(ver string) int {
 	var wg sync.WaitGroup
 	total := 0
 	success := 0
@@ -168,18 +198,17 @@ func UpdateImage(ver string) (int, error) {
 
 	if criuDir == "" {
 		log.Errorf("Missing criuDir settings in config file \n")
-		return 0, errors.New("Missing criuDir settings in config file")
+		return -1
 	}
 
-	findPids(criuPids)
+	err := findPids(criuPids)
+	if err != nil {
+		return -1
+	}
 
 	overrideServiceConfig(criuPids)
-	// dump process memory
+
 	for key, value := range criuPids {
-		if value == -1 {
-			log.Errorf("Unable to find pid for " + key)
-			return 0, errors.New("Unable to find pid for " + key)
-		}
 		dirPath := path.Join(criuDir, key)
 		_ = os.Mkdir(dirPath, 0700)
 		wg.Add(1)
@@ -193,10 +222,10 @@ func UpdateImage(ver string) (int, error) {
 
 	if success < total {
 		removeAllOverrideSys()
-		return 0, errors.New("Some processes dump failed.\n")
+		log.Errorf("Some processes dump failed.\n")
+		return -1
 	}
 
-	
 	configDir := path.Join(criuDir, "config")
 	_ = os.Mkdir(configDir, 0700)
 
@@ -204,34 +233,24 @@ func UpdateImage(ver string) (int, error) {
 
 	cmdline, err := loadCmdline()
 	if err != nil {
-		return 0, err
+		log.Error(err)
+		return -1
 	}
 
-	// update kexec image
 	err, _ = runCmd(kexecExe, []string{"-q", "/boot/vmlinuz-" + ver,
-		"--initrd", "/boot/initramfs-" + ver + ".img", "--append="+cmdline},
-		nil, nil, nil)
+		"--initrd", "/boot/initramfs-" + ver + ".img", "--append=" +
+			cmdline}, os.Stdin, os.Stdout, os.Stderr)
 	if err != nil {
 		log.Errorf("Unable to load kernel image, err is %s \n", err)
-		return 0, err
+		return -1
 	}
 
-	err, _ = runCmd(kexecExe, []string{"-e"}, nil, nil, nil)
+	err, _ = runCmd(kexecExe, []string{"-e"}, os.Stdin, os.Stdout, os.Stderr)
 	if err != nil {
 		log.Errorf("Unable to run kexec -e with err %s \n", err)
+		return -1
 	}
-	return 0, nil
-}
-
-func ExitServer(msg string) (int, error) {
-	exitServer <- true
-	log.Debugf("Server will exit \n")
-	return 0, nil
-}
-
-func EchoMsg(msg string) (int, error) {
-	log.Debugf("Get msg " + msg)
-	return 0, nil
+	return 0
 }
 
 func readConfig(curConfig *viper.Viper, name string) {
@@ -242,11 +261,11 @@ func readConfig(curConfig *viper.Viper, name string) {
 	curConfig.AddConfigPath("/etc/nvwa/")
 	err := curConfig.ReadInConfig()
 	if err != nil {
-		panic(fmt.Errorf("Load config %s failed, %s \n", name, err))
+		log.Fatalf("Load config %s failed, %s \n", name, err)
 	}
 	curConfig.WatchConfig()
 	curConfig.OnConfigChange(func(e fsnotify.Event) {
-		log.Errorf("Config file changed: please restart the server", e.Name)
+		log.Debugf("Config file changed", e.Name)
 	})
 }
 
@@ -257,20 +276,20 @@ func loadConfig() {
 	readConfig(nvwaRestoreConfig, "nvwa-restore")
 }
 
-func RestoreService(service string) (int, error) {
+func RestoreService(service string) int {
 	criuExe := nvwaSeverConfig.GetString("criu_exe")
 	criuDir := nvwaSeverConfig.GetString("criu_dir")
 
 	err, _ := runCmd(criuExe, []string{"restore", "-D", path.Join(criuDir, service),
 		"-o", "restore.log", "--tcp-established", "--ext-unix-sk",
 		"--shell-job", "--daemon", "-j", "-vv"}, nil, nil, nil)
-	if (err != nil) {
+	if err != nil {
 		log.Errorf("Restore %s failed, error is %s \n", service, err)
-		return 0, err
+		return -1
 	}
 	log.Debugf("Restore service %s successfully \n", service)
 	removeOverrideSystemctl(service)
-	return 0, nil
+	return 0
 }
 
 func RestoreProcess() {
@@ -302,36 +321,89 @@ func RestoreProcess() {
 	log.Debugf("Wait criu runs finished \n")
 	wg.Wait()
 	log.Debugf("%d:%d process(es) restore suceessfully. \n", success, total)
+	if success < total {
+		log.Debugf("Some process(es) restore failed,\n"+
+			"check nvwa log and init enviroment before next trial", success, total)
+	} else {
+		removeAllPids()
+	}
 	return
 }
 
-func runServer(ip, port string) {
-	addr := ip + ":" + port
-	srv := server.NewServer(addr)
-	srv.Register("update", UpdateImage)
-	srv.Register("restore", RestoreService)
-	srv.Register("exit", ExitServer)
-	srv.Register("echo", EchoMsg)
-	srv.Register("init", InitEnv)
-	go srv.Run()
+func handleCMD(cmd string) int {
+	cmds := strings.Split(cmd, " ")
+	if len(cmds) != 3 {
+		log.Errorf("Get wrong cmd len %d \n", len(cmds))
+		return -1
+	}
+	if cmds[0] != "nvwa:" {
+		log.Errorf("Get wrong secret %s \n", cmds[0])
+		return -1
+	}
+	if v, e := rpmList[cmds[1]]; e {
+		return v(cmds[2])
+	}
+	log.Errorf("%s is not registered \n", cmds[1])
+	return -1
 }
 
-func startServer(ip, port string, mode int) {
-	var wg sync.WaitGroup
+func ExitServer(msg string) int {
+	exitServer <- true
+	log.Debugf("Server will exit \n")
+	return 0
+}
+
+func runServer(path string) {
+	registerRPC("update", UpdateImage)
+	registerRPC("restore", RestoreService)
+	registerRPC("init", InitEnv)
+	registerRPC("exit", ExitServer)
+
+	addr, err := net.ResolveUnixAddr("unix", path)
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	l, err := net.ListenUnix("unix", addr)
+	if err != nil {
+		log.Errorf("Please ensure run it as root. \n")
+		log.Errorf("Ensure no other nvwa process is running.")
+		log.Errorf("And remove %s mannually if necessary. \n", path)
+		log.Fatal(err)
+	}
+
+	for {
+		conn, err := l.AcceptUnix()
+		if err != nil {
+			log.Fatal(err)
+		}
+		var buf [1024]byte
+		n, err := conn.Read(buf[:])
+		if err != nil {
+			log.Fatal(err)
+		}
+		ret := handleCMD(string(buf[:n]))
+		_, err = conn.Write([]byte(strconv.Itoa(ret)))
+		if err != nil {
+			log.Fatal(err)
+		}
+		conn.Close()
+	}
+}
+
+func clearServer(socketPath string) {
+	os.Remove(socketPath)
+}
+
+func startServer(socketPath string) {
 	log.SetLevel(log.DebugLevel)
 	exitServer = make(chan bool)
 
 	loadConfig()
-	runServer(ip, port)
+	go runServer(socketPath)
 	NotifySytemd()
-	if mode == 2 {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			RestoreProcess()
-		}()
-	}
-	wg.Wait()
-	log.Debugf("Server is running in ip %s with port %s \n", ip, port)
+	go RestoreProcess()
+	log.Debugf("Server is listening in %s \n", socketPath)
 	<-exitServer
+	clearServer(socketPath)
 }
