@@ -4,17 +4,15 @@ import (
 	"flag"
 )
 
+var socketPath = "/tmp/nvwa.socket"
+
 func main() {
-	mode := flag.Int("mode", 0,
+	server := flag.Int("server", 0,
 		"set this value to 1 to start a server")
-	ipAddr := flag.String("ip", "localhost",
-		"specify server ip")
-	port := flag.String("port", "3232",
-		"specify server port")
 	flag.Parse()
-	if *mode != 0 {
-		startServer(*ipAddr, *port, *mode)
+	if *server != 0 {
+		startServer(socketPath)
 	} else {
-		startClient(*ipAddr, *port)
+		startClient(socketPath)
 	}
 }

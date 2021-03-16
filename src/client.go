@@ -3,29 +3,42 @@ package main
 import (
 	"net"
 	"os"
+	"strconv"
 	"time"
 
-	"github.com/ankur-anand/simple-go-rpc/src/client"
 	log "github.com/sirupsen/logrus"
 	"github.com/urfave/cli/v2"
 )
 
-var callFunc func(string) (int, error)
-
-func sendCmdToServer(ip, port, cmd, param string) (int, error) {
-	addr := ip + ":" + port
-	conn, err := net.Dial("tcp", addr)
+func sendCmdToServer(path, cmd, param string) int {
+	c, err := net.Dial("unix", path)
 	if err != nil {
-		log.Errorf("Unable to connect to server, error is %s \n", err)
-		return 0, err
+		log.Fatal(err)
 	}
-	defer conn.Close()
-	cli := client.NewClient(conn)
-	cli.CallRPC(cmd, &callFunc)
-	return callFunc(param)
+	defer c.Close()
+	msg := "nvwa: " + cmd + " " + param
+	_, err = c.Write([]byte(msg))
+	if err != nil {
+		log.Fatal(err)
+	}
+	buf := make([]byte, 1024)
+	n, err := c.Read(buf[:])
+	if err != nil {
+		log.Fatal(err)
+	}
+	ret, err := strconv.Atoi(string(buf[0:n]))
+	if err != nil {
+		log.Fatal(err)
+	}
+	return ret
 }
 
-func startClient(ip, port string) {
+func handleRet(cmd string, ret int) {
+	log.Fatalf("Execute %s with ret %d, "+
+		"Please check nvwa service log \n", cmd, ret)
+}
+
+func startClient(path string) {
 	log.SetLevel(log.DebugLevel)
 	app := &cli.App{
 		Name:     "nvwa",
@@ -46,51 +59,49 @@ func startClient(ip, port string) {
 				Name:  "update",
 				Usage: "specify kernel version for nvwa to update",
 				Action: func(c *cli.Context) error {
-					ret, err := sendCmdToServer(ip, port, "update", c.Args().First())
+					ret := sendCmdToServer(path, "update", c.Args().First())
 					log.Debugf("Update version to %s \n", c.Args().First())
-					if err != nil {
-						log.WithFields(log.Fields{
-							"ip":        ip,
-							"port":      port,
-							"version":	 c.Args().First(),
-						}).Errorf("Execute update cmd exit with ret %d and error %s \n", ret, err)
+					if ret != 0 {
+						handleRet("update", ret)
 					}
-					return err
+					return nil
 				},
 			},
 			{
 				Name:  "restore",
 				Usage: "restore service",
 				Action: func(c *cli.Context) error {
-					ret, err := sendCmdToServer(ip, port, "restore", c.Args().First())
+					ret := sendCmdToServer(path, "restore", c.Args().First())
 					log.Debugf("Resore service %s \n", c.Args().First())
-					if err != nil {
-						log.WithFields(log.Fields{
-							"ip":   	ip,
-							"port": 	port,
-							"service": 	c.Args().First(),
-							"pid": 		c.Args().Get(1),
-						}).Errorf("Execute restore cmd exit with ret %d and error %s \n", ret, err)
-						return err
+					if ret != 0 {
+						handleRet("restore", ret)
 					}
 					RestoreMainPid(c.Args().Get(1))
 					NotifySytemd()
 					SystemdReload()
-					return err
+					return nil
 				},
 			},
 			{
 				Name:  "init",
 				Usage: "init nvwa running environment",
 				Action: func(c *cli.Context) error {
-					ret, err := sendCmdToServer(ip, port, "init", "")
-					if err != nil {
-						log.WithFields(log.Fields{
-							"ip":   ip,
-							"port": port,
-						}).Errorf("Execute init cmd exit with ret %d and error %s \n", ret, err)
+					ret := sendCmdToServer(path, "init", "")
+					if ret != 0 {
+						handleRet("init", ret)
 					}
-					return err
+					return nil
+				},
+			},
+			{
+				Name:  "exit",
+				Usage: "exit nvwa service",
+				Action: func(c *cli.Context) error {
+					ret := sendCmdToServer(path, "exit", "")
+					if ret != 0 {
+						handleRet("exit", ret)
+					}
+					return nil
 				},
 			},
 		},

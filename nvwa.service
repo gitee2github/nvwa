@@ -3,8 +3,8 @@ Description=NVWA server
 After=network-online.target auditd.service
 
 [Service]
-ExecStart=/usr/bin/nvwa -mode 2
-ExecReload=/usr/bin/nvwa -mode 1
+ExecStart=/usr/bin/nvwa -server 1
+ExecStop=/usr/bin/nvwa exit
 User=root
 Group=root
 KillMode=process
