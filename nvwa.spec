@@ -39,10 +39,13 @@ install -m 0750 %{_builddir}/%{name}-v%{version}/src/%{name} %{buildroot}/%{_bin
 install -m 0640 %{_builddir}/%{name}-v%{version}/config/%{name}-restore.yaml %{buildroot}/etc/%{name}/
 install -m 0640 %{_builddir}/%{name}-v%{version}/config/%{name}-server.yaml %{buildroot}/etc/%{name}/
 
-install -m 0644 %{_builddir}/%{name}-v%{version}/%{name}.service %{buildroot}/usr/lib/systemd/system
+install -m 0750 %{_builddir}/%{name}-v%{version}/misc/%{name}-pre.sh %{buildroot}/%{_bindir}/
+install -m 0644 %{_builddir}/%{name}-v%{version}/misc/%{name}.service %{buildroot}/usr/lib/systemd/system
+install -m 0644 %{_builddir}/%{name}-v%{version}/misc/%{name}-pre.service %{buildroot}/usr/lib/systemd/system
 
 %post
 %systemd_post %{name}.service
+%systemd_post %{name}-pre.service
 
 %preun
 %systemd_preun %{name}.service
@@ -59,8 +62,9 @@ install -m 0644 %{_builddir}/%{name}-v%{version}/%{name}.service %{buildroot}/us
 /etc/%{name}/%{name}-restore.yaml
 /etc/%{name}/%{name}-server.yaml
 /usr/lib/systemd/system/%{name}.service
+/usr/lib/systemd/system/%{name}-pre.service
 %{_bindir}/%{name}
-
+%{_bindir}/%{name}-pre.sh
 
 %changelog
 * Thu Feb 18 2021 anatasluo <luolongjun@huawei.com>
