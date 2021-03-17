@@ -2,3 +2,4 @@ pids:
 services:
 restore_net: false
 enable_quick_kexec: false
+enable_pin_memory: false

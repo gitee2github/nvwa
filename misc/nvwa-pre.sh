@@ -33,6 +33,7 @@ fi
 
 # 2. Enable Pin Memory
 modprobe pin_memory
+/usr/bin/nvwa-pin --init-pagemap-read
 
 # 3. Enable PMEM
 grep -q "Persistent Memory" /proc/iomem || exit 0

@@ -47,8 +47,8 @@ func startClient(path string) {
 		Compiled: time.Now(),
 		Commands: []*cli.Command{
 			{
-				Name:  "check",
-				Usage: "check kexec and criu version",
+				Name:   "check",
+				Usage:  "check kexec and criu version",
 				Hidden: true,
 				Action: func(c *cli.Context) error {
 					// When build rpm package, rpmbuild will check requires, no more need here
@@ -57,8 +57,8 @@ func startClient(path string) {
 				},
 			},
 			{
-				Name:  "update",
-				Usage: "specify kernel version for nvwa to update",
+				Name:   "update",
+				Usage:  "specify kernel version for nvwa to update",
 				Hidden: false,
 				Action: func(c *cli.Context) error {
 					ret := sendCmdToServer(path, "update", c.Args().First())
@@ -70,8 +70,8 @@ func startClient(path string) {
 				},
 			},
 			{
-				Name:  "restore",
-				Usage: "restore service",
+				Name:   "restore",
+				Usage:  "restore service",
 				Hidden: true,
 				Action: func(c *cli.Context) error {
 					ret := sendCmdToServer(path, "restore", c.Args().First())
@@ -86,8 +86,8 @@ func startClient(path string) {
 				},
 			},
 			{
-				Name:  "init",
-				Usage: "init nvwa running environment",
+				Name:   "init",
+				Usage:  "init nvwa running environment",
 				Hidden: false,
 				Action: func(c *cli.Context) error {
 					ret := sendCmdToServer(path, "init", "")
@@ -98,8 +98,8 @@ func startClient(path string) {
 				},
 			},
 			{
-				Name:  "exit",
-				Usage: "exit nvwa service",
+				Name:   "exit",
+				Usage:  "exit nvwa service",
 				Hidden: true,
 				Action: func(c *cli.Context) error {
 					ret := sendCmdToServer(path, "exit", "")
