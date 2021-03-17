@@ -30,15 +30,16 @@ cd -
 
 mkdir -p %{buildroot}/%{_bindir}
 mkdir -p %{buildroot}/etc/%{name}
-mkdir -p %{buildroot}/etc/%{name}/running
 mkdir -p %{buildroot}/etc/%{name}/log
-mkdir -p %{buildroot}/etc/systemd/system
+mkdir -p %{buildroot}/usr/lib/systemd/system
+mkdir -p %{buildroot}/var/%{name}
+mkdir -p %{buildroot}/var/%{name}/running
 
 install -m 0750 %{_builddir}/%{name}-v%{version}/src/%{name} %{buildroot}/%{_bindir}/
 install -m 0640 %{_builddir}/%{name}-v%{version}/config/%{name}-restore.yaml %{buildroot}/etc/%{name}/
 install -m 0640 %{_builddir}/%{name}-v%{version}/config/%{name}-server.yaml %{buildroot}/etc/%{name}/
 
-install -m 0644 %{_builddir}/%{name}-v%{version}/%{name}.service %{buildroot}/etc/systemd/system/
+install -m 0644 %{_builddir}/%{name}-v%{version}/%{name}.service %{buildroot}/usr/lib/systemd/system
 
 %post
 %systemd_post %{name}.service
@@ -52,11 +53,12 @@ install -m 0644 %{_builddir}/%{name}-v%{version}/%{name}.service %{buildroot}/et
 %files
 %license LICENSE
 %dir /etc/%{name}/
-%dir /etc/%{name}/running
 %dir /etc/%{name}/log
+%dir /var/%{name}
+%dir /var/%{name}/running
 /etc/%{name}/%{name}-restore.yaml
 /etc/%{name}/%{name}-server.yaml
-/etc/systemd/system/%{name}.service
+/usr/lib/systemd/system/%{name}.service
 %{_bindir}/%{name}
 
 

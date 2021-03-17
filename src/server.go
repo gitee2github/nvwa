@@ -33,22 +33,23 @@ func registerRPC(cmd string, rpc rpmFunc) {
 	rpmList[cmd] = rpc
 }
 
-func overrideConf(path string, content string) {
+func overrideConf(path string, content string) error {
 	f, err := os.Create(path)
 	if err != nil {
 		log.Errorf("Unable to create file %s, err is %s \n", path, err)
-		return
+		return err
 	}
 	defer f.Close()
 
 	_, err = f.WriteString(content)
 	if err != nil {
 		log.Errorf("Unable to write file %s, err is %s \n", path, err)
-		return
+		return err
 	}
+	return nil
 }
 
-func overrideSystemctl(service string, pid int) {
+func overrideSystemctl(service string, pid int) error {
 	systemdEtc := nvwaSeverConfig.GetString("systemd_etc")
 
 	systemdDir := path.Join(systemdEtc, service+".service.d")
@@ -57,18 +58,28 @@ func overrideSystemctl(service string, pid int) {
 	content := "[Service]\nExecStart=\nExecStart="
 	content += "nvwa restore " + service + " " + strconv.Itoa(pid) + "\n"
 	content += "User=root\nGroup=root\n"
-	overrideConf(path.Join(systemdDir, "nvwa_override_exec.conf"), content)
+	err := overrideConf(path.Join(systemdDir, "nvwa_override_exec.conf"), content)
+	if err != nil {
+		return err
+	}
 
 	content = "[Unit]\nAfter=nvwa.service network-online.target\n"
 	content += "[Service]\nRestart=no\n"
-	overrideConf(path.Join(systemdDir, "nvwa_override_restart.conf"), content)
+	err = overrideConf(path.Join(systemdDir, "nvwa_override_restart.conf"), content)
+	if err != nil {
+		return err
+	}
+	return nil
 }
 
-func overrideServiceConfig(criuPids map[string]int) {
+func overrideServiceConfig(criuPids map[string]int) error {
 	services := nvwaRestoreConfig.GetStringSlice("services")
 	for _, val := range services {
-		overrideSystemctl(val, criuPids[val])
+		if err := overrideSystemctl(val, criuPids[val]); err != nil {
+			return err
+		}
 	}
+	return nil
 }
 
 func getPidName(pid string) (string, error) {
@@ -206,7 +217,10 @@ func UpdateImage(ver string) int {
 		return -1
 	}
 
-	overrideServiceConfig(criuPids)
+	err = overrideServiceConfig(criuPids)
+	if err != nil {
+		return -1
+	}
 
 	for key, value := range criuPids {
 		dirPath := path.Join(criuDir, key)
@@ -237,7 +251,13 @@ func UpdateImage(ver string) int {
 		return -1
 	}
 
-	err, _ = runCmd(kexecExe, []string{"-q", "/boot/vmlinuz-" + ver,
+	kexecLoad := "-l"
+	enableQK := nvwaRestoreConfig.GetBool("enable_quick_kexec")
+	if (enableQK) {
+		kexecLoad = "-q"
+	}
+
+	err, _ = runCmd(kexecExe, []string{kexecLoad, "/boot/vmlinuz-" + ver,
 		"--initrd", "/boot/initramfs-" + ver + ".img", "--append=" +
 			cmdline}, os.Stdin, os.Stdout, os.Stderr)
 	if err != nil {
@@ -292,7 +312,7 @@ func RestoreService(service string) int {
 	return 0
 }
 
-func RestoreProcess() {
+func restoreProcess() {
 	var wg sync.WaitGroup
 	total := 0
 	success := 0
@@ -402,7 +422,7 @@ func startServer(socketPath string) {
 	loadConfig()
 	go runServer(socketPath)
 	NotifySytemd()
-	go RestoreProcess()
+	go restoreProcess()
 	log.Debugf("Server is listening in %s \n", socketPath)
 	<-exitServer
 	clearServer(socketPath)
