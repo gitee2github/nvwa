@@ -65,7 +65,7 @@ func overrideSystemctl(service string, pid int) error {
 
 	content = "[Unit]\nAfter=nvwa.service network-online.target\n"
 	content += "[Service]\nRestart=no\n"
-	err := overrideConf(path.Join(systemdDir, "nvwa_override_restart.conf"), content)
+	err = overrideConf(path.Join(systemdDir, "nvwa_override_restart.conf"), content)
 	if err != nil {
 		return err
 	}
