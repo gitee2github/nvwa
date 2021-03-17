@@ -1,0 +1,12 @@
+[Unit]
+Description=Prepare for NVWA service
+Requires=local-fs.target
+After=local-fs.target
+Before=nvwa.service
+
+[Service]
+ExecStart=/usr/bin/nvwa-pre.sh
+User=root
+Group=root
+Type=oneshot
+RemainAfterExit=yes
