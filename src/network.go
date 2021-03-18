@@ -3,6 +3,7 @@ package main
 import (
 	"os"
 	"path"
+
 	log "github.com/sirupsen/logrus"
 )
 
@@ -89,4 +90,3 @@ func RestoreAllNet(dirPath string) {
 	RestoreRoute(path.Join(dirPath, "route"))
 	RestoreRule(path.Join(dirPath, "rule"))
 }
-

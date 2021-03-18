@@ -90,7 +90,7 @@ func getPidName(pid string) (string, error) {
 		return "", err
 	}
 	names := strings.Split(strings.TrimSuffix(string(data), "\n"), "/")
-	name := names[len(names) - 1]
+	name := names[len(names)-1]
 	if len(name) == 0 {
 		name = pid
 	}
@@ -118,7 +118,7 @@ func findPids(criuPids map[string]int) error {
 	services := nvwaRestoreConfig.GetStringSlice("services")
 	for _, val := range services {
 		err, tmpRet := runCmd("systemctl", []string{"show", "--property",
-			"MainPID", "--value", val}, nil, nil, nil)
+			"MainPID", "--value", val}, os.Stdin, os.Stdout, os.Stderr)
 		if err != nil {
 			log.Errorf("Unable to get pid for service %s\n", val)
 			log.Errorf("Error is %s \n", err)
@@ -164,8 +164,7 @@ func removeOverrideSystemctl(service string) error {
 		log.Errorf("Unable to remove restart service file for %s err %s \n", service, err)
 		return err
 	}
-
-	return removePidImage(service)
+	return nil
 }
 
 func removeAllOverrideSys() {
@@ -175,17 +174,27 @@ func removeAllOverrideSys() {
 	}
 }
 
-func removeAllPids() {
+func removeAllImg() {
 	pidNames := nvwaRestoreConfig.GetStringSlice("pids")
 	for _, val := range pidNames {
+		removePidImage(val)
+	}
+
+	services := nvwaRestoreConfig.GetStringSlice("services")
+	for _, val := range services {
 		removePidImage(val)
 	}
 }
 
 func InitEnv(env string) int {
 	log.Debugf("Init Env \n")
+	enablePM := nvwaRestoreConfig.GetBool("enable_pin_memory")
+
 	removeAllOverrideSys()
-	removeAllPids()
+	removeAllImg()
+	if enablePM {
+		pinMemoryClear()
+	}
 	return 0
 }
 
@@ -198,6 +207,32 @@ func loadCmdline() (string, error) {
 	return strings.TrimSuffix(string(data), "\n"), err
 }
 
+func getCriuExtPara() []string {
+	criuExtPara := []string{"--shell-job"}
+
+	enablePM := nvwaRestoreConfig.GetBool("enable_pin_memory")
+	if enablePM {
+		criuExtPara = append(criuExtPara, "--pin-memory")
+	}
+
+	return criuExtPara
+}
+
+func getCriuPara(op string, dir string, pid string) []string {
+	criuBasicPara := []string{}
+	criuExtPara := getCriuExtPara()
+	if op == "dump" {
+		criuBasicPara = []string{op, "-D", dir, "-t", pid,
+		"-o", "dump.log", "--tcp-established", "--ext-unix-sk",
+		"--file-locks", "--daemon", "-vv"}
+	} else if op == "restore" {
+		criuBasicPara = []string{op, "-D", dir,
+		"-o", "restore.log", "--tcp-established", "--ext-unix-sk",
+		"--file-locks", "--daemon", "-vv"}
+	}
+	return append(criuBasicPara, criuExtPara...)
+}
+
 func UpdateImage(ver string) int {
 	var wg sync.WaitGroup
 	total := 0
@@ -206,6 +241,8 @@ func UpdateImage(ver string) int {
 	criuDir := nvwaSeverConfig.GetString("criu_dir")
 	criuExe := nvwaSeverConfig.GetString("criu_exe")
 	kexecExe := nvwaSeverConfig.GetString("kexec_exe")
+	enableQK := nvwaRestoreConfig.GetBool("enable_quick_kexec")
+	enablePM := nvwaRestoreConfig.GetBool("enable_pin_memory")
 
 	if criuDir == "" {
 		log.Errorf("Missing criuDir settings in config file \n")
@@ -222,14 +259,26 @@ func UpdateImage(ver string) int {
 		return -1
 	}
 
+	if enablePM {
+		err = pinMemoryClear()
+		if err != nil {
+			log.Errorf("Execute clear pin memory failed \n")
+			log.Errorf("Error: %s \n", err)
+			return -1
+		}
+	}
+
 	for key, value := range criuPids {
 		dirPath := path.Join(criuDir, key)
 		_ = os.Mkdir(dirPath, 0700)
 		wg.Add(1)
 		total++
-		go waitCmd(criuExe, []string{"dump", "-D", dirPath,
-			"-t", strconv.Itoa(value), "-o", "dump.log", "--tcp-established", "--ext-unix-sk",
-			"--shell-job", "--daemon", "-j", "-vv"}, &wg, nil, nil, nil, &success)
+		go waitCmd(criuExe, getCriuPara("dump", dirPath, strconv.Itoa(value)), &wg,
+			os.Stdin, os.Stdout, os.Stderr, &success)
+		if enablePM {
+			/* limitation of pin-memory, only support serial execution */
+			wg.Wait()
+		}
 	}
 	wg.Wait()
 	log.Debugf("%d:%d process(es) dump successfully\n", success, total)
@@ -240,6 +289,14 @@ func UpdateImage(ver string) int {
 		return -1
 	}
 
+	if enablePM {
+		err = pinMemoryFinish()
+		if err != nil {
+			log.Errorf("Execute finish pin memory failed \n")
+			log.Errorf("Error: %s \n", err)
+			return -1
+		}
+	}
 	configDir := path.Join(criuDir, "config")
 	_ = os.Mkdir(configDir, 0700)
 
@@ -252,8 +309,7 @@ func UpdateImage(ver string) int {
 	}
 
 	kexecLoad := "-l"
-	enableQK := nvwaRestoreConfig.GetBool("enable_quick_kexec")
-	if (enableQK) {
+	if enableQK {
 		kexecLoad = "-q"
 	}
 
@@ -300,15 +356,15 @@ func RestoreService(service string) int {
 	criuExe := nvwaSeverConfig.GetString("criu_exe")
 	criuDir := nvwaSeverConfig.GetString("criu_dir")
 
-	err, _ := runCmd(criuExe, []string{"restore", "-D", path.Join(criuDir, service),
-		"-o", "restore.log", "--tcp-established", "--ext-unix-sk",
-		"--shell-job", "--daemon", "-j", "-vv"}, nil, nil, nil)
+	err, _ := runCmd(criuExe, getCriuPara("restore", path.Join(criuDir, service), ""),
+		os.Stdin, os.Stdout, os.Stderr)
 	if err != nil {
 		log.Errorf("Restore %s failed, error is %s \n", service, err)
 		return -1
 	}
 	log.Debugf("Restore service %s successfully \n", service)
 	removeOverrideSystemctl(service)
+	removePidImage(service)
 	return 0
 }
 
@@ -334,9 +390,8 @@ func restoreProcess() {
 
 		wg.Add(1)
 		total++
-		go waitCmd(criuExe, []string{"restore", "-D", path,
-			"-o", "restore.log", "--tcp-established", "--ext-unix-sk", "--shell-job",
-			"--daemon", "-j", "-vv"}, &wg, os.Stdin, os.Stdout, os.Stderr, &success)
+		go waitCmd(criuExe, getCriuPara("restore", path, ""),
+			&wg, os.Stdin, os.Stdout, os.Stderr, &success)
 	}
 	log.Debugf("Wait criu runs finished \n")
 	wg.Wait()
@@ -345,7 +400,7 @@ func restoreProcess() {
 		log.Debugf("Some process(es) restore failed,\n"+
 			"check nvwa log and init enviroment before next trial", success, total)
 	} else {
-		removeAllPids()
+		removeAllImg()
 	}
 	return
 }

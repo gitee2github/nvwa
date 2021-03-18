@@ -1,11 +1,12 @@
 package main
 
 import (
-	log "github.com/sirupsen/logrus"
 	"io"
 	"os/exec"
 	"strings"
 	"sync"
+
+	log "github.com/sirupsen/logrus"
 )
 
 func runCmd(cmd string, args []string, stdin io.Reader, stdout, stderr io.Writer) (error, string) {
@@ -41,6 +42,6 @@ func waitCmd(cmd string, args []string, wg *sync.WaitGroup, stdin io.Reader, std
 	defer wg.Done()
 	err, _ := runCmd(cmd, args, stdin, stdout, stderr)
 	if err == nil {
-		*count ++
+		*count++
 	}
 }

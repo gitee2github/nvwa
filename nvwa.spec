@@ -1,15 +1,16 @@
 Name:           nvwa
 Version:        0.1
-Release:        1
+Release:        2
 Summary:        a tool used for openEuler kernel update
 
-License:        MulanPSL-2.0 and Apache-2.0 and MIT
+License:        MulanPSL-2.0 and Apache-2.0 and MIT and MPL-2.0
 URL:            https://gitee.com/openeuler/nvwa
 Source:         %{name}-v%{version}.tar.gz
 
 BuildRequires:  golang >= 1.13
 Requires:       kexec-tools criu
 Requires:       systemd-units iptables-services iproute
+Requires:       gcc
 
 %description
 A tool used to automate the process of seamless update of the openEuler.
@@ -26,6 +27,10 @@ cd src
 go build -mod=vendor
 cd -
 
+cd tools
+gcc %{name}-pin.c -o %{name}-pin
+cd -
+
 %install
 
 mkdir -p %{buildroot}/%{_bindir}
@@ -36,6 +41,7 @@ mkdir -p %{buildroot}/var/%{name}
 mkdir -p %{buildroot}/var/%{name}/running
 
 install -m 0750 %{_builddir}/%{name}-v%{version}/src/%{name} %{buildroot}/%{_bindir}/
+install -m 0750 %{_builddir}/%{name}-v%{version}/tools/%{name}-pin %{buildroot}/%{_bindir}/
 install -m 0640 %{_builddir}/%{name}-v%{version}/config/%{name}-restore.yaml %{buildroot}/etc/%{name}/
 install -m 0640 %{_builddir}/%{name}-v%{version}/config/%{name}-server.yaml %{buildroot}/etc/%{name}/
 
@@ -64,8 +70,11 @@ install -m 0644 %{_builddir}/%{name}-v%{version}/misc/%{name}-pre.service %{buil
 /usr/lib/systemd/system/%{name}.service
 /usr/lib/systemd/system/%{name}-pre.service
 %{_bindir}/%{name}
+%{_bindir}/%{name}-pin
 %{_bindir}/%{name}-pre.sh
 
 %changelog
+* Wed 17 Mar 2021 anatasluo <luolongjun@huawei.com>
+- Update to 0.1-r2
 * Thu Feb 18 2021 anatasluo <luolongjun@huawei.com>
 - Update to 0.0.1
