@@ -118,7 +118,7 @@ func findPids(criuPids map[string]int) error {
 	services := nvwaRestoreConfig.GetStringSlice("services")
 	for _, val := range services {
 		err, tmpRet := runCmd("systemctl", []string{"show", "--property",
-			"MainPID", "--value", val}, os.Stdin, os.Stdout, os.Stderr)
+			"MainPID", "--value", val}, nil, nil, nil)
 		if err != nil {
 			log.Errorf("Unable to get pid for service %s\n", val)
 			log.Errorf("Error is %s \n", err)
@@ -139,7 +139,7 @@ func findPids(criuPids map[string]int) error {
 	return nil
 }
 
-func removePidImage(psName string) error {
+func removeCriuImage(psName string) error {
 	criuDir := nvwaSeverConfig.GetString("criu_dir")
 	err := os.RemoveAll(path.Join(criuDir, psName))
 	if err != nil {
@@ -174,15 +174,17 @@ func removeAllOverrideSys() {
 	}
 }
 
-func removeAllImg() {
-	pidNames := nvwaRestoreConfig.GetStringSlice("pids")
-	for _, val := range pidNames {
-		removePidImage(val)
-	}
-
+func removeServiceImg() {
 	services := nvwaRestoreConfig.GetStringSlice("services")
 	for _, val := range services {
-		removePidImage(val)
+		removeCriuImage(val)
+	}
+}
+
+func removeProcessImg() {
+	pidNames := nvwaRestoreConfig.GetStringSlice("pids")
+	for _, val := range pidNames {
+		removeCriuImage(val)
 	}
 }
 
@@ -191,7 +193,8 @@ func InitEnv(env string) int {
 	enablePM := nvwaRestoreConfig.GetBool("enable_pin_memory")
 
 	removeAllOverrideSys()
-	removeAllImg()
+	removeProcessImg()
+	removeServiceImg()
 	if enablePM {
 		pinMemoryClear()
 	}
@@ -364,7 +367,7 @@ func RestoreService(service string) int {
 	}
 	log.Debugf("Restore service %s successfully \n", service)
 	removeOverrideSystemctl(service)
-	removePidImage(service)
+	removeCriuImage(service)
 	return 0
 }
 
@@ -400,7 +403,7 @@ func restoreProcess() {
 		log.Debugf("Some process(es) restore failed,\n"+
 			"check nvwa log and init enviroment before next trial", success, total)
 	} else {
-		removeAllImg()
+		removeProcessImg()
 	}
 	return
 }
