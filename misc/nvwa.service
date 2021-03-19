@@ -9,7 +9,6 @@ ExecStop=/usr/bin/nvwa exit
 User=root
 Group=root
 KillMode=process
-Restart=on-failure
 Type=notify
 
 [Install]
