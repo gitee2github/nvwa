@@ -226,12 +226,12 @@ func getCriuPara(op string, dir string, pid string) []string {
 	criuExtPara := getCriuExtPara()
 	if op == "dump" {
 		criuBasicPara = []string{op, "-D", dir, "-t", pid,
-		"-o", "dump.log", "--tcp-established", "--ext-unix-sk",
-		"--file-locks", "--daemon", "-vv"}
+			"-o", "dump.log", "--tcp-established", "--ext-unix-sk",
+			"--file-locks", "--daemon", "-vv"}
 	} else if op == "restore" {
 		criuBasicPara = []string{op, "-D", dir,
-		"-o", "restore.log", "--tcp-established", "--ext-unix-sk",
-		"--file-locks", "--daemon", "-vv"}
+			"-o", "restore.log", "--tcp-established", "--ext-unix-sk",
+			"--file-locks", "--daemon", "-vv"}
 	}
 	return append(criuBasicPara, criuExtPara...)
 }
@@ -344,7 +344,7 @@ func readConfig(curConfig *viper.Viper, name string) {
 	}
 	curConfig.WatchConfig()
 	curConfig.OnConfigChange(func(e fsnotify.Event) {
-		log.Debugf("Config file changed", e.Name)
+		log.Debugf("Config file %s changed", e.Name)
 	})
 }
 
@@ -400,8 +400,8 @@ func restoreProcess() {
 	wg.Wait()
 	log.Debugf("%d:%d process(es) restore suceessfully. \n", success, total)
 	if success < total {
-		log.Debugf("Some process(es) restore failed,\n"+
-			"check nvwa log and init enviroment before next trial", success, total)
+		log.Debugf("Some process(es) restore failed,\n" +
+			"check nvwa log and init enviroment before next trial")
 	} else {
 		removeProcessImg()
 	}
