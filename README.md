@@ -33,21 +33,13 @@ go build
 
 #### 支持的命令
 
-+ nvwa check -- 运行环境检查
-
 + nvwa update <version> -- 热升级到相应的内核版本(相关文件需放置在/boot下)
 
     nvwa将会去/boot目录下寻找需要的kernel和rootfs，kernel的命名格式需为vmlinuz-<version>, rootfs命名格式需为initramfs-<version>.img
 
-+ nvwa restore <process> -- 恢复某个之前freeze的进程
-
 + nvwa help
 
     显示client相关的帮助信息
-
-+ nvwa --help
-
-    显示server相关的帮助信息
 
 + nvwa init
 
@@ -64,8 +56,5 @@ go build
 
 #### 开发计划
 
-+ 将/boot目录下kernel和rootfs的命名格式放入配置项
-+ 支持日志重定向至文件
-+ 配置文件改变后，服务自动重新加载
-+ server/client帮助文本的问题
-+ rpc框架非正式应用，示范用的程序，考虑重写或者自己维护
++ 将criu/kexec/nvwa的日志集中管理
++ 打印时间戳，自动计算时延

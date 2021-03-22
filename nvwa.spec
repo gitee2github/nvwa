@@ -42,8 +42,8 @@ mkdir -p %{buildroot}/var/%{name}/running
 
 install -m 0750 %{_builddir}/%{name}-v%{version}/src/%{name} %{buildroot}/%{_bindir}/
 install -m 0750 %{_builddir}/%{name}-v%{version}/tools/%{name}-pin %{buildroot}/%{_bindir}/
-install -m 0640 %{_builddir}/%{name}-v%{version}/config/%{name}-restore.yaml %{buildroot}/etc/%{name}/
-install -m 0640 %{_builddir}/%{name}-v%{version}/config/%{name}-server.yaml %{buildroot}/etc/%{name}/
+install -m 0640 %{_builddir}/%{name}-v%{version}/src/config/%{name}-restore.yaml %{buildroot}/etc/%{name}/
+install -m 0640 %{_builddir}/%{name}-v%{version}/src/config/%{name}-server.yaml %{buildroot}/etc/%{name}/
 
 install -m 0750 %{_builddir}/%{name}-v%{version}/misc/%{name}-pre.sh %{buildroot}/%{_bindir}/
 install -m 0644 %{_builddir}/%{name}-v%{version}/misc/%{name}.service %{buildroot}/usr/lib/systemd/system
