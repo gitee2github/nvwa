@@ -324,7 +324,7 @@ func UpdateImage(ver string) int {
 
 	DumpAllNet(configDir)
 
-	err, _ = runCmd(kexecExe, []string{"-e"}, os.Stdin, os.Stdout, os.Stderr)
+	err, _ = runCmd(kexecExe, []string{"-e", "-x"}, os.Stdin, os.Stdout, os.Stderr)
 	if err != nil {
 		log.Errorf("Unable to run kexec -e with err %s \n", err)
 		return -1
