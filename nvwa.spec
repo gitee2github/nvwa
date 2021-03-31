@@ -28,7 +28,7 @@ go build -mod=vendor
 cd -
 
 cd tools
-gcc %{name}-pin.c -o %{name}-pin
+gcc ./pin/%{name}-pin.c -o %{name}-pin
 cd -
 
 %install

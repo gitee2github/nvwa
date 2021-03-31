@@ -6,6 +6,7 @@ import (
 	"net"
 	"os"
 	"path"
+	"path/filepath"
 	"reflect"
 	"runtime"
 	"strconv"
@@ -252,7 +253,26 @@ func UpdateImage(ver string) int {
 		return -1
 	}
 
-	err := findPids(criuPids)
+	kexecLoad := "-l"
+	if enableQK {
+		kexecLoad = "-q"
+	}
+
+	cmdline, err := loadCmdline()
+	if err != nil {
+		log.Error(err)
+		return -1
+	}
+
+	err, _ = runCmd(kexecExe, []string{kexecLoad, "/boot/vmlinuz-" + ver,
+		"--initrd", "/boot/initramfs-" + ver + ".img", "--append=" +
+			cmdline}, os.Stdin, os.Stdout, os.Stderr)
+	if err != nil {
+		log.Errorf("Unable to load kernel image, err is %s \n", err)
+		return -1
+	}
+
+	err = findPids(criuPids)
 	if err != nil {
 		return -1
 	}
@@ -305,26 +325,7 @@ func UpdateImage(ver string) int {
 
 	DumpAllNet(configDir)
 
-	cmdline, err := loadCmdline()
-	if err != nil {
-		log.Error(err)
-		return -1
-	}
-
-	kexecLoad := "-l"
-	if enableQK {
-		kexecLoad = "-q"
-	}
-
-	err, _ = runCmd(kexecExe, []string{kexecLoad, "/boot/vmlinuz-" + ver,
-		"--initrd", "/boot/initramfs-" + ver + ".img", "--append=" +
-			cmdline}, os.Stdin, os.Stdout, os.Stderr)
-	if err != nil {
-		log.Errorf("Unable to load kernel image, err is %s \n", err)
-		return -1
-	}
-
-	err, _ = runCmd(kexecExe, []string{"-e"}, os.Stdin, os.Stdout, os.Stderr)
+	err, _ = runCmd(kexecExe, []string{"-e", "-x"}, os.Stdin, os.Stdout, os.Stderr)
 	if err != nil {
 		log.Errorf("Unable to run kexec -e with err %s \n", err)
 		return -1
@@ -431,11 +432,22 @@ func ExitServer(msg string) int {
 	return 0
 }
 
+func may_init_socket(path string) error {
+	socketDir := filepath.Dir(path)
+	log.Debugf("Socket directory %s \n", socketDir)
+	return os.Mkdir(socketDir, 0700)
+}
+
 func runServer(path string) {
 	registerRPC("update", UpdateImage)
 	registerRPC("restore", RestoreService)
 	registerRPC("init", InitEnv)
 	registerRPC("exit", ExitServer)
+
+	err := may_init_socket(path)
+	if err != nil {
+		log.Fatal(err)
+	}
 
 	addr, err := net.ResolveUnixAddr("unix", path)
 	if err != nil {
