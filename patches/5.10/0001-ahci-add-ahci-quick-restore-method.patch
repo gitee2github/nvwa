@@ -1,0 +1,670 @@
+From e55b649e9eb8a8e83c4eafe2eff697f0d496d85c Mon Sep 17 00:00:00 2001
+From: root <root@localhost.localdomain>
+Date: Thu, 25 Mar 2021 03:32:24 +0000
+Subject: [PATCH 1/8] ahci: add ahci quick restore method
+
+usage:
+  # echo 1 > /proc/module_state_store
+check:
+  # dmesg |  grep "module backup finished"
+
+NOTICE:
+ `echo 1 > /proc/module_state_store` only can do once!!! The action is
+before `kexec`
+
+Signed-off-by: Kai Shen <shenkai8@huawei.com>
+Signed-off-by: EulerOSWander <314264452@qq.com>
+---
+ arch/arm64/configs/openeuler_defconfig   |   4 +-
+ arch/arm64/mm/init.c                     |  55 +++++
+ drivers/ata/ahci.c                       |  18 +-
+ drivers/ata/libata-core.c                | 125 +++++++++++-
+ include/linux/modrestore.h               |  30 +++
+ kernel/Makefile                          |   2 +
+ kernel/modrestore/Makefile               |   1 +
+ kernel/modrestore/module_state_manager.c | 248 +++++++++++++++++++++++
+ lib/Kconfig                              |  15 ++
+ 9 files changed, 489 insertions(+), 9 deletions(-)
+ create mode 100644 include/linux/modrestore.h
+ create mode 100644 kernel/modrestore/Makefile
+ create mode 100644 kernel/modrestore/module_state_manager.c
+
+diff --git a/arch/arm64/configs/openeuler_defconfig b/arch/arm64/configs/openeuler_defconfig
+index 21c5d1125..ea385a454 100644
+--- a/arch/arm64/configs/openeuler_defconfig
++++ b/arch/arm64/configs/openeuler_defconfig
+@@ -2240,7 +2240,7 @@ CONFIG_SCSI_PROC_FS=y
+ #
+ # SCSI support type (disk, tape, CD-ROM)
+ #
+-CONFIG_BLK_DEV_SD=m
++CONFIG_BLK_DEV_SD=y
+ CONFIG_CHR_DEV_ST=m
+ CONFIG_BLK_DEV_SR=m
+ CONFIG_CHR_DEV_SG=m
+@@ -2351,7 +2351,7 @@ CONFIG_SATA_PMP=y
+ #
+ # Controllers with non-SFF native interface
+ #
+-CONFIG_SATA_AHCI=m
++CONFIG_SATA_AHCI=y
+ CONFIG_SATA_MOBILE_LPM_POLICY=0
+ CONFIG_SATA_AHCI_PLATFORM=m
+ # CONFIG_AHCI_CEVA is not set
+diff --git a/arch/arm64/mm/init.c b/arch/arm64/mm/init.c
+index d60507def..c3a4366bd 100644
+--- a/arch/arm64/mm/init.c
++++ b/arch/arm64/mm/init.c
+@@ -395,6 +395,58 @@ out:
+ }
+ #endif
+ 
++#ifdef CONFIG_EULEROS_MODRESTORE
++unsigned long module_state_start_phy;
++extern unsigned long module_state_start;
++extern unsigned long module_state_end;
++unsigned long module_state_size = 0x100000;
++
++static int __init parse_modrestore_mem(char *p)
++{
++	if (!p)
++		return 0;
++
++	module_state_start_phy = PAGE_ALIGN(memparse(p, NULL));
++	if (module_state_start == 0)
++		pr_info("cpu park mem params[%s]", p);
++
++	return 0;
++}
++early_param("modrestoremem", parse_modrestore_mem);
++
++static int __init reserve_modrestore_mem(void)
++{
++	if (module_state_start_phy == 0)
++		return 0;
++
++	module_state_start = (unsigned long)__va(PAGE_ALIGN(module_state_start_phy));
++	module_state_size = PAGE_ALIGN(module_state_size);
++	module_state_end = module_state_start + module_state_size;
++
++	if (!memblock_is_region_memory(module_state_start_phy, module_state_size)) {
++		pr_warn("cannot reserve modrestore mem: region is not memory! %lx %lx", module_state_start, module_state_size);
++		goto out;
++	}
++
++	if (memblock_is_region_reserved(module_state_start_phy, module_state_size)) {
++		pr_warn("cannot reserve modrestore mem: region overlaps reserved memory!");
++		goto out;
++	}
++
++	memblock_reserve(module_state_start_phy, module_state_size);
++	pr_info("cpu park mem reserved: 0x%016lx - 0x%016lx (%ld MB)",
++		module_state_start_phy, module_state_start_phy + module_state_size,
++		module_state_size >> 20);
++
++	return 0;
++out:
++	module_state_start = 0;
++	module_state_start_phy = 0;
++	module_state_size = 0;
++	return -EINVAL;
++}
++#endif
++
+ static int __init is_mem_valid(unsigned long long mem_size, unsigned long long mem_start)
+ {
+ 	if (!memblock_is_region_memory(mem_start, mem_size)) {
+@@ -651,6 +703,9 @@ void __init bootmem_init(void)
+ #ifdef CONFIG_QUICK_KEXEC
+ 	reserve_quick_kexec();
+ #endif
++#ifdef CONFIG_EULEROS_MODRESTORE
++	reserve_modrestore_mem();
++#endif
+ 
+ 	/*
+ 	 * request_standard_resources() depends on crashkernel's memory being
+diff --git a/drivers/ata/ahci.c b/drivers/ata/ahci.c
+index 00ba8e5a1..f93c81b56 100644
+--- a/drivers/ata/ahci.c
++++ b/drivers/ata/ahci.c
+@@ -34,6 +34,10 @@
+ #include <linux/io-64-nonatomic-lo-hi.h>
+ #include "ahci.h"
+ 
++#ifdef CONFIG_AHCI_FAST_KEXEC
++#include <linux/modrestore.h>
++#endif
++
+ #define DRV_NAME	"ahci"
+ #define DRV_VERSION	"3.0"
+ 
+@@ -1894,11 +1898,17 @@ static int ahci_init_one(struct pci_dev *pdev, const struct pci_device_id *ent)
+ 	if (rc)
+ 		return rc;
+ 
+-	rc = ahci_reset_controller(host);
+-	if (rc)
+-		return rc;
++#ifdef CONFIG_AHCI_FAST_KEXEC
++	if (!is_module_state_restore_boot()) {
++#endif
++		rc = ahci_reset_controller(host);
++		if (rc)
++			return rc;
+ 
+-	ahci_pci_init_controller(host);
++		ahci_pci_init_controller(host);
++#ifdef CONFIG_AHCI_FAST_KEXEC
++	}
++#endif
+ 	ahci_pci_print_info(host);
+ 
+ 	pci_set_master(pdev);
+diff --git a/drivers/ata/libata-core.c b/drivers/ata/libata-core.c
+index 61c762961..c54247274 100644
+--- a/drivers/ata/libata-core.c
++++ b/drivers/ata/libata-core.c
+@@ -64,6 +64,10 @@
+ #include "libata.h"
+ #include "libata-transport.h"
+ 
++#ifdef CONFIG_AHCI_FAST_KEXEC
++#include <linux/modrestore.h>
++#endif
++
+ const struct ata_port_operations ata_base_port_ops = {
+ 	.prereset		= ata_std_prereset,
+ 	.postreset		= ata_std_postreset,
+@@ -5177,6 +5181,93 @@ void ata_dev_init(struct ata_device *dev)
+  *	LOCKING:
+  *	Kernel thread context (may sleep)
+  */
++
++#ifdef CONFIG_AHCI_FAST_KEXEC
++static struct ata_link *ata_link_list[100];
++static int ata_link_num;
++static bool ata_modrestored;
++
++static int ata_link_backup(void);
++
++static struct module_state_ops ata_link_state_ops = {
++	.module_name = "ata_link",
++	.suspend = ata_link_backup,
++};
++
++static int ata_link_backup(void)
++{
++	int i;
++	size_t sz;
++	struct ata_link *root_data;
++	struct ata_link *link;
++	char tmp[MODULE_NAME_MAX_LEN];
++
++	if (ata_modrestored)
++		return 0;
++	ata_modrestored = true;
++
++	pr_info("ahci host backup\n");
++	for (i = 0; i < ata_link_num; i++) {
++		sz = sizeof(struct ata_link);
++		link = ata_link_list[i];
++
++		sprintf(tmp, "ata%sport%d", dev_name(link->ap->host->dev), link->ap->port_no);
++		pr_info("backup link %s size:%ld\n", tmp, sz);
++		root_data = alloc_module_state_space(tmp, sz);
++		if (root_data == NULL)
++			return -ENOMEM;
++
++		memcpy(root_data, link, sz);
++	}
++	return 0;
++}
++
++static struct ata_link *get_saved_ata_link(const char *host_name, unsigned int port_no)
++{
++	struct ata_link *root_data;
++	char tmp[MODULE_NAME_MAX_LEN];
++
++	sprintf(tmp, "ata%sport%d", host_name, port_no);
++
++	root_data = get_module_state_space(tmp);
++	if (root_data == NULL)
++		return NULL;
++
++	return root_data;
++}
++
++void ata_link_restore(struct ata_port *ap, struct ata_link *link, int pmp)
++{
++	struct ata_link *saved_link;
++	struct ata_device *ata_dev;
++
++	saved_link = get_saved_ata_link(dev_name(ap->host->dev), ap->port_no);
++	if (saved_link == NULL) {
++		pr_info("ata get saved data error\n");
++		return ata_link_init(ap, link, pmp);
++	}
++	memcpy(link, saved_link, sizeof(struct ata_link));
++
++	link->ap = ap;
++	link->tdev.kobj.parent = NULL;
++	link->tdev.p = NULL;
++	link->tdev.kobj.state_initialized = 0;
++	link->tdev.kobj.name = NULL;
++	link->tdev.power.early_init = false;
++	ata_for_each_dev(ata_dev, link, ALL) {
++		ata_dev->link = link;
++		ata_dev->tdev.p = NULL;
++		ata_dev->tdev.driver = NULL;
++		ata_dev->tdev.bus = NULL;
++		ata_dev->tdev.kobj.state_initialized = 0;
++		ata_dev->tdev.kobj.parent = 0;
++		ata_dev->tdev.kobj.name = NULL;
++		ata_dev->tdev.power.early_init = false;
++		ata_dev->sdev = NULL;
++	}
++}
++#endif
++
+ void ata_link_init(struct ata_port *ap, struct ata_link *link, int pmp)
+ {
+ 	int i;
+@@ -5259,6 +5350,11 @@ struct ata_port *ata_port_alloc(struct ata_host *host)
+ 		return NULL;
+ 
+ 	ap->pflags |= ATA_PFLAG_INITIALIZING | ATA_PFLAG_FROZEN;
++#ifdef CONFIG_AHCI_FAST_KEXEC
++	if (is_module_state_restore_boot())
++		ap->pflags &= ~ATA_PFLAG_FROZEN;
++#endif
++
+ 	ap->lock = &host->lock;
+ 	ap->print_id = -1;
+ 	ap->local_port_no = -1;
+@@ -5285,7 +5381,20 @@ struct ata_port *ata_port_alloc(struct ata_host *host)
+ 
+ 	ap->cbl = ATA_CBL_NONE;
+ 
+-	ata_link_init(ap, &ap->link, 0);
++#ifdef CONFIG_AHCI_FAST_KEXEC
++	ata_link_list[ata_link_num] = &ap->link;
++	ata_link_num++;
++	if (ata_link_num == 1)
++		if (register_module_state_ops(&ata_link_state_ops))
++			pr_info("register atai link backup func fail\n");
++
++	if (!is_module_state_restore_boot())
++#endif
++		ata_link_init(ap, &ap->link, 0);
++#ifdef CONFIG_AHCI_FAST_KEXEC
++	else
++		ata_link_restore(ap, &ap->link, 0);
++#endif
+ 
+ #ifdef ATA_IRQ_TRAP
+ 	ap->stats.unhandled_irq = 1;
+@@ -5595,7 +5704,10 @@ int ata_host_start(struct ata_host *host)
+ 				goto err_out;
+ 			}
+ 		}
+-		ata_eh_freeze_port(ap);
++#ifdef CONFIG_AHCI_FAST_KEXEC
++		if (!is_module_state_restore_boot())
++#endif
++			ata_eh_freeze_port(ap);
+ 	}
+ 
+ 	if (start_dr)
+@@ -5683,7 +5795,14 @@ static void async_port_probe(void *data, async_cookie_t cookie)
+ 	if (!(ap->host->flags & ATA_HOST_PARALLEL_SCAN) && ap->port_no != 0)
+ 		async_synchronize_cookie(cookie);
+ 
+-	(void)ata_port_probe(ap);
++#ifdef CONFIG_AHCI_FAST_KEXEC
++	if (!is_module_state_restore_boot())
++#endif
++		(void)ata_port_probe(ap);
++#ifdef CONFIG_AHCI_FAST_KEXEC
++	else
++		pr_info("skip ata host scan\n");
++#endif
+ 
+ 	/* in order to keep device order, we need to synchronize at this point */
+ 	async_synchronize_cookie(cookie);
+diff --git a/include/linux/modrestore.h b/include/linux/modrestore.h
+new file mode 100644
+index 000000000..d55dd7b44
+--- /dev/null
++++ b/include/linux/modrestore.h
+@@ -0,0 +1,30 @@
++#ifndef MODRESTORE_HEADER
++#define MODRESOTRE_HEADER
++#ifdef CONFIG_EULEROS_MODRESTORE
++#include <linux/list.h>
++
++#define MODULE_NAME_MAX_LEN 64
++
++/* can be accessed in both checkpoint stage or restore stage */
++struct module_state_data {
++	char module_name[MODULE_NAME_MAX_LEN];
++	unsigned int size;
++	void *data;
++};
++
++/* can be only accessed in checkpoint stage */
++struct module_state_ops {
++	char module_name[MODULE_NAME_MAX_LEN];
++	int (*suspend)(void);
++	struct list_head list;
++};
++
++extern int register_module_state_ops(struct module_state_ops *ops);
++extern void *get_module_state_space(char *name);
++
++/* should not be called twice with one name */
++extern void *alloc_module_state_space(char *name, unsigned long size);
++
++extern bool is_module_state_restore_boot(void);
++#endif
++#endif
+diff --git a/kernel/Makefile b/kernel/Makefile
+index 8179d42e9..b0f3edbd2 100644
+--- a/kernel/Makefile
++++ b/kernel/Makefile
+@@ -124,6 +124,8 @@ obj-$(CONFIG_WATCH_QUEUE) += watch_queue.o
+ 
+ obj-$(CONFIG_SYSCTL_KUNIT_TEST) += sysctl-test.o
+ 
++obj-$(CONFIG_EULEROS_MODRESTORE)	+= modrestore/
++
+ CFLAGS_stackleak.o += $(DISABLE_STACKLEAK_PLUGIN)
+ obj-$(CONFIG_GCC_PLUGIN_STACKLEAK) += stackleak.o
+ KASAN_SANITIZE_stackleak.o := n
+diff --git a/kernel/modrestore/Makefile b/kernel/modrestore/Makefile
+new file mode 100644
+index 000000000..fba1191d7
+--- /dev/null
++++ b/kernel/modrestore/Makefile
+@@ -0,0 +1 @@
++obj-y				+= module_state_manager.o
+diff --git a/kernel/modrestore/module_state_manager.c b/kernel/modrestore/module_state_manager.c
+new file mode 100644
+index 000000000..e171e63d2
+--- /dev/null
++++ b/kernel/modrestore/module_state_manager.c
+@@ -0,0 +1,248 @@
++#include <linux/string.h>
++#include <linux/proc_fs.h>
++#include <linux/list.h>
++#include <linux/modrestore.h>
++#include <linux/pin_mem.h>
++#include <linux/module.h>
++
++#define MODRESTORE_MAGIC 0x60
++#define _MODULE_STATE_RESTORE 1
++#define MODULE_STATE_RESTORE _IOW(MODRESTORE_MAGIC, _MODULE_STATE_RESTORE, int)
++
++unsigned long module_state_start;
++unsigned long module_state_end;
++
++static struct module_state_data *module_state_data_start;
++static struct module_state_data *curr_module_state;
++
++static spinlock_t state_data_list_lock;
++static spinlock_t state_ops_list_lock;
++
++static struct module_state_ops mod_state_ops_list;
++static int *total_module_state_num;
++
++static bool modrestore_enabled;
++static bool module_state_restore_boot;
++static bool module_backup_space_initialized;
++
++static int __init modrestore_enable(char *data)
++{
++	modrestore_enabled = true;
++	return 0;
++}
++__setup("modrestore_enable", modrestore_enable);
++
++static int __init module_state_restore(char *data)
++{
++	module_state_restore_boot = true;
++	return 0;
++}
++__setup("module_state_restore", module_state_restore);
++
++bool is_module_state_restore_boot(void)
++{
++	return module_state_restore_boot;
++}
++EXPORT_SYMBOL(is_module_state_restore_boot);
++
++static inline
++struct module_state_data *next_module_state_data(struct module_state_data *start)
++{
++	unsigned long address = (unsigned long)start +
++				sizeof(struct module_state_data) + start->size;
++	return (struct module_state_data *)address;
++}
++
++static inline int get_module_state_num(void)
++{
++	int ret;
++
++	spin_lock(&state_data_list_lock);
++	ret = *total_module_state_num;
++	spin_unlock(&state_data_list_lock);
++	return ret;
++}
++
++/* should be callled after the initialization of module backup space */
++void clear_module_backup_space(void)
++{
++	curr_module_state = module_state_data_start;
++	*total_module_state_num = 0;
++}
++
++static int __init init_module_backup_space(void)
++{
++	if (!modrestore_enabled) {
++		module_state_restore_boot = false;
++		pr_info("module_state_restore disabled\n");
++		return 0;
++	}
++
++	pr_info("module_state_restore init\n");
++
++	if (!module_state_start) {
++		pr_info("no mem reserved for module state\n");
++		return -1;
++	}
++
++	module_state_data_start = (struct module_state_data *)(module_state_start +
++					sizeof(total_module_state_num));
++	curr_module_state = (struct module_state_data *)(module_state_start +
++					sizeof(total_module_state_num));
++	total_module_state_num = (int *)module_state_start;
++
++	if (!is_module_state_restore_boot())
++		clear_module_backup_space();
++	else
++		pr_info("is module state restore boot\n");
++
++	spin_lock_init(&state_data_list_lock);
++	spin_lock_init(&state_ops_list_lock);
++	INIT_LIST_HEAD(&mod_state_ops_list.list);
++
++	module_backup_space_initialized = true;
++
++	return 0;
++}
++early_initcall(init_module_backup_space);
++
++int register_module_state_ops(struct module_state_ops *ops)
++{
++	if (!module_backup_space_initialized)
++		return -1;
++
++	INIT_LIST_HEAD(&ops->list);
++	spin_lock(&state_ops_list_lock);
++	list_add_tail(&ops->list, &mod_state_ops_list.list);
++	spin_unlock(&state_ops_list_lock);
++
++	return 0;
++}
++EXPORT_SYMBOL(register_module_state_ops);
++
++struct module_state_data *alloc_module_state_data(unsigned long size)
++{
++	struct module_state_data *start = NULL;
++
++	if (!module_backup_space_initialized) {
++		pr_info("alloc module state fail\n");
++		return NULL;
++	}
++
++	spin_lock(&state_data_list_lock);
++	if (!curr_module_state)
++		curr_module_state = module_state_data_start;
++
++	start = curr_module_state;
++	if ((unsigned long)start + size > module_state_end)
++		goto out;
++
++	curr_module_state = (struct module_state_data *)
++		((unsigned long)curr_module_state + sizeof(struct module_state_data) + size);
++
++	(*total_module_state_num)++;
++out:
++	spin_unlock(&state_data_list_lock);
++	return start;
++}
++
++void *alloc_module_state_space(char *name, unsigned long size)
++{
++	struct module_state_data *data;
++
++	if (strlen(name) >= MODULE_NAME_MAX_LEN)
++		return NULL;
++
++	data = alloc_module_state_data(size);
++	if (data == NULL)
++		return NULL;
++
++	strcpy(data->module_name, name);
++	data->size = size;
++
++	return &data->data;
++}
++EXPORT_SYMBOL(alloc_module_state_space);
++
++void *get_module_state_space(char *name)
++{
++	int i;
++	struct module_state_data *pos = module_state_data_start;
++	int num;
++
++	if (!module_backup_space_initialized) {
++		pr_info("get module state start fail\n");
++		return NULL;
++	}
++	if (strlen(name) >= MODULE_NAME_MAX_LEN)
++		return NULL;
++
++	num = get_module_state_num();
++
++	for (i = 0; i < num; i++) {
++		if (strcmp(pos->module_name, name) == 0)
++			return &pos->data;
++		pos = next_module_state_data(pos);
++	}
++	return NULL;
++}
++EXPORT_SYMBOL(get_module_state_space);
++
++void do_module_backup(void)
++{
++	struct module_state_ops *node;
++
++	if (list_empty(&mod_state_ops_list.list))
++		return;
++
++	node = list_first_entry(&mod_state_ops_list.list,
++			struct module_state_ops, list);
++
++	for (;;) {
++		pr_info("modrestore:backup %s\n", node->module_name);
++
++		if (node->suspend != NULL)
++			node->suspend();
++
++		if (list_is_last(&node->list, &mod_state_ops_list.list))
++			break;
++		node = list_next_entry(node, list);
++	}
++}
++
++static ssize_t module_state_store_write(struct file *file,
++		const char __user *buffer, size_t count, loff_t *pos)
++{
++	spin_lock(&state_ops_list_lock);
++	do_module_backup();
++	spin_unlock(&state_ops_list_lock);
++	pr_info("module backup finished\n");
++
++	return count;
++}
++
++static const struct proc_ops module_state_store_fops = {
++	.proc_write      = module_state_store_write,
++};
++
++static int __init proc_module_state_init(void)
++{
++	struct proc_dir_entry *entry;
++
++	if (!modrestore_enabled)
++		return 0;
++
++	pr_info("modrestore procfs init\n");
++
++	if (!module_backup_space_initialized)
++		return -1;
++
++	entry = proc_create("module_state_store", 0, NULL, &module_state_store_fops);
++	if (entry == NULL)
++		pr_info("modrestore create procfs fail\n");
++
++	pr_info("modrestore procfs init successfully\n");
++
++	return 0;
++}
++fs_initcall(proc_module_state_init);
+diff --git a/lib/Kconfig b/lib/Kconfig
+index cb5e620bf..5f86bdd90 100644
+--- a/lib/Kconfig
++++ b/lib/Kconfig
+@@ -700,3 +700,18 @@ config GENERIC_LIB_UCMPDI2
+ config PLDMFW
+ 	bool
+ 	default n
++
++menu "hotupgrade"
++config EULEROS_MODRESTORE
++	bool "Support for module memory restoration"
++	default y
++	help
++	  Say y here to enable module memory restoration
++
++config AHCI_FAST_KEXEC
++	bool "AHCI fast kexec"
++	depends on EULEROS_MODRESTORE
++	default y
++	help
++	  Say y here to AHCI fast kexec
++endmenu
+-- 
+2.31.0
+
