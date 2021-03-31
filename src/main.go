@@ -4,7 +4,7 @@ import (
 	"flag"
 )
 
-var socketPath = "/run/nvwa.socket"
+var socketPath = "/run/nvwa/nvwa.socket"
 
 func main() {
 	server := flag.Int("server", 0,

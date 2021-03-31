@@ -6,6 +6,7 @@ import (
 	"net"
 	"os"
 	"path"
+	"path/filepath"
 	"reflect"
 	"runtime"
 	"strconv"
@@ -431,11 +432,22 @@ func ExitServer(msg string) int {
 	return 0
 }
 
+func may_init_socket(path string) error {
+	socketDir := filepath.Dir(path)
+	log.Debugf("Socket directory %s \n", socketDir)
+	return os.Mkdir(socketDir, 0700)
+}
+
 func runServer(path string) {
 	registerRPC("update", UpdateImage)
 	registerRPC("restore", RestoreService)
 	registerRPC("init", InitEnv)
 	registerRPC("exit", ExitServer)
+
+	err := may_init_socket(path)
+	if err != nil {
+		log.Fatal(err)
+	}
 
 	addr, err := net.ResolveUnixAddr("unix", path)
 	if err != nil {
