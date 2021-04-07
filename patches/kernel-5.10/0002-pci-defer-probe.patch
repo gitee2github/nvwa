@@ -1,0 +1,277 @@
+From 283a1f02dfe7f64f65eaba1a5639f7b6e863a1e7 Mon Sep 17 00:00:00 2001
+From: EulerOSWander <314264452@qq.com>
+Date: Thu, 17 Sep 2020 15:47:57 +0800
+Subject: [PATCH 2/8] pci defer probe
+
+usage: add `pci_defer=<bus><dev><fn>,...` in cmdline
+
+exmaple: `pci_defer=pci_defer=7d000e,bd000e,050001,0a0001`
+
+funno is mask
+
+Signed-off-by: EulerOSWander <314264452@qq.com>
+---
+ drivers/pci/probe.c | 233 ++++++++++++++++++++++++++++++++++++++++++++
+ 1 file changed, 233 insertions(+)
+
+diff --git a/drivers/pci/probe.c b/drivers/pci/probe.c
+index cda8bc145..a7fe45045 100644
+--- a/drivers/pci/probe.c
++++ b/drivers/pci/probe.c
+@@ -3,6 +3,7 @@
+  * PCI detection and setup code
+  */
+ 
++#include <linux/bitmap.h>
+ #include <linux/kernel.h>
+ #include <linux/delay.h>
+ #include <linux/init.h>
+@@ -43,6 +44,234 @@ struct pci_domain_busn_res {
+ 	int domain_nr;
+ };
+ 
++/*
++ * Deferring PCI bus probe in oneshot mode
++ */
++
++struct pci_defer_dev {
++	struct list_head	entry;
++	unsigned char		dev;
++	unsigned char		fn_bits; /* fn bitmap */
++};
++
++struct pci_defer_bus {
++	struct list_head	entry;
++	unsigned char		bus;
++	struct mutex		lock;
++	struct list_head	devices;
++	struct kref		ref;
++};
++
++static LIST_HEAD(pci_defer_buses);
++static DEFINE_MUTEX(pci_defer_mutex);
++
++#define PCI_DEFER_DEV		32
++
++/*
++ * The only functional memory allocator in __setup() is memblock, which
++ * isn't a good idea to be used here to allocate non-boot-phase memory.
++ * Use static array instead.
++ */
++static unsigned int pci_defer_early[PCI_DEFER_DEV] = {0};
++
++/* Make sure defer probe only once */
++static unsigned long pci_defer_parsed = 0;
++
++static int pci_defer_dev(struct pci_defer_bus *bus, unsigned char devno,
++			unsigned char fn_bits)
++{
++	struct pci_defer_dev *dev;
++
++	mutex_lock(&bus->lock);
++	list_for_each_entry(dev, &bus->devices, entry) {
++		if (dev->dev != devno)
++			continue;
++
++		pr_info("PCI defer: add fn bitmask %02x to %02x:%02x.%02x\n",
++			fn_bits, bus->bus, devno, dev->fn_bits);
++
++		fn_bits |= dev->fn_bits;
++		if (fn_bits == dev->fn_bits) {
++			mutex_unlock(&bus->lock);
++			return -EEXIST;
++		}
++
++		dev->fn_bits = fn_bits;
++		goto out;
++	}
++
++	dev = kzalloc(sizeof(*dev), GFP_KERNEL);
++	if (!dev) {
++		mutex_unlock(&bus->lock);
++		return -ENOMEM;
++	}
++
++	dev->dev = devno;
++	dev->fn_bits = fn_bits;
++	list_add_tail(&dev->entry, &bus->devices);
++
++	pr_info("PCI defer: add %02x:%02x.%02x\n", bus->bus, devno, dev->fn_bits);
++out:
++	mutex_unlock(&bus->lock);
++	return 0;
++}
++
++static void pci_defer_release(struct kref *kref)
++{
++	struct pci_defer_bus *bus;
++
++	bus = container_of(kref, struct pci_defer_bus, ref);
++	mutex_lock(&pci_defer_mutex);
++	list_del(&bus->entry);
++	mutex_unlock(&pci_defer_mutex);
++	BUG_ON(!list_empty(&bus->devices));
++	kfree(bus);
++}
++
++static int pci_defer(unsigned char busno, unsigned char devno,
++			unsigned char fn_bits)
++{
++	struct pci_defer_bus *bus;
++	int err;
++
++	mutex_lock(&pci_defer_mutex);
++	list_for_each_entry(bus, &pci_defer_buses, entry) {
++		if (bus->bus == busno) {
++			kref_get(&bus->ref);
++			goto out;
++		}
++	}
++
++	bus = kzalloc(sizeof(*bus), GFP_KERNEL);
++	if (!bus) {
++		mutex_unlock(&pci_defer_mutex);
++		return -ENOMEM;
++	}
++
++	bus->bus = busno;
++	INIT_LIST_HEAD(&bus->devices);
++	mutex_init(&bus->lock);
++	kref_init(&bus->ref);
++	list_add_tail(&bus->entry, &pci_defer_buses);
++out:
++	mutex_unlock(&pci_defer_mutex);
++
++	err = pci_defer_dev(bus, devno, fn_bits);
++	if (err)
++		kref_put(&bus->ref, pci_defer_release);
++
++	return err;
++}
++
++static void pci_defer_init(void)
++{
++	unsigned int *val = pci_defer_early;
++	int i;
++
++	for (i = 0; *val && (i < PCI_DEFER_DEV); val++, i++) {
++		unsigned char bus, dev, fn_bits;
++
++		fn_bits = *val & 0xff;
++		dev = (*val >> 8) & 0xff;
++		bus = (*val >> 16) & 0xff;
++
++		pr_info(">>> %02x:%02x.%02x\n", bus, dev, fn_bits);
++		if (pci_defer(bus, dev, fn_bits)) {
++			pr_err("Defer PCI address failed, ignored\n");
++			continue;
++		}
++	}
++
++	pr_info("PCI defer initialized\n");
++}
++
++static int __init pci_defer_config(char *buf)
++{
++	char *next = buf;
++	int i;
++
++	for (i = 0; buf && (i < PCI_DEFER_DEV); buf = next) {
++		unsigned int val;
++
++		next = strchr(buf, ',');
++		if (next) {
++			*next = '\0';
++			next++;
++		}
++
++		if (kstrtouint(buf, 16, &val)) {
++			pr_err("Bad PCI address: %s\n", buf);
++			continue;
++		}
++
++		pci_defer_early[i] = val;
++		i++;
++
++		pr_info("Defer PCI address %06x\n", val);
++	}
++
++	return 0;
++}
++__setup("pci_defer=", pci_defer_config);
++
++static int pci_ignore_once(unsigned char busno, unsigned char devno,
++			unsigned char fn)
++{
++	struct pci_defer_bus *bus;
++	struct pci_defer_dev *dev;
++#if 1
++	unsigned int *iter = pci_defer_early;
++	int i;
++	unsigned int target = 0;
++
++	target |= busno;
++	target = ((target << 8) | devno) << 8;
++
++	pr_info("pci_ignore_once: target=%x\n", target);
++
++	for (i = 0; *iter && (i < PCI_DEFER_DEV); iter++, i++) {
++		pr_info("pci compare address: %x vs %x\n", target, *iter);
++		if ((target == (*iter & ~0xff)) &&
++		    (((1 << fn) | *iter) == *iter) ) {
++			pr_info("pci ignore address: %x\n", target);
++			return 0;
++		}
++	}
++#else
++	if (!test_and_set_bit(1, &pci_defer_parsed))
++		pci_defer_init();
++#endif
++	/*
++	 * No further iterations are needed once target was found,
++	 * so we can do list removal without *_safe functions.
++	 */
++	list_for_each_entry(bus, &pci_defer_buses, entry) {
++		if (bus->bus != busno)
++			continue;
++
++		list_for_each_entry(dev, &bus->devices, entry) {
++			if (dev->dev != devno)
++				continue;
++			if (!test_and_clear_bit(fn, (unsigned long *)&dev->fn_bits))
++				return -EINVAL;
++
++			pr_info("PCI address %02x:%02x.%02x ignored for once\n",
++				bus->bus, dev->dev, fn);
++
++			if (!dev->fn_bits) {
++				mutex_lock(&bus->lock);
++				list_del(&dev->entry);
++				mutex_unlock(&bus->lock);
++				kfree(dev);
++				kref_put(&bus->ref, pci_defer_release);
++			}
++			return 0;
++		}
++	}
++
++	return -EINVAL;
++}
++
+ static struct resource *get_pci_domain_busn_res(int domain_nr)
+ {
+ 	struct pci_domain_busn_res *r;
+@@ -2614,6 +2843,10 @@ int pci_scan_slot(struct pci_bus *bus, int devfn)
+ 		nr++;
+ 
+ 	for (fn = next_fn(bus, dev, 0); fn > 0; fn = next_fn(bus, dev, fn)) {
++		pr_info(">>> pci_scan_slot: defer %02x:%02x.%02x\n", bus->number, devfn, fn);
++		if (!pci_ignore_once(bus->number, devfn, fn))
++			continue;
++
+ 		dev = pci_scan_single_device(bus, devfn + fn);
+ 		if (dev) {
+ 			if (!pci_dev_is_added(dev))
+-- 
+2.31.0
+

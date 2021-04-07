@@ -1,0 +1,4 @@
+1、0001-ahci-add-ahci-quick-restore-method.patch
+提供ahci sata 盘的快速恢复功能。
+2、0002-pci-defer-probe.patch
+提供pci port的延迟加载功能，提高内核启动速度。
