@@ -35,8 +35,10 @@ int main(int argc , char *argv[])
 		printf("Open file:%s fail.\n", PIN_MEM_FILE);
 		return -1;
 	}
-	if (argc < INPUT_PARA_NUM + 1)
+	if (argc < INPUT_PARA_NUM + 1) {
+		close(fd);
 		return -EINVAL;
+	}
 	if (!strcmp(argv[1], "--finish-pin")) {
 		ret = ioctl(fd, FINISH_PIN_MEM_DUMP, &para);
 		if (ret < 0) {
