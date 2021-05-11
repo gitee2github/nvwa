@@ -2,3 +2,9 @@
 提供ahci sata 盘的快速恢复功能。
 2、0002-pci-defer-probe.patch
 提供pci port的延迟加载功能，提高内核启动速度。
+3、0003-module-ignore-version-magic.patch
+忽略版本检查。
+4、0004-kexec-ignore-shutdown-device.patch
+重启时，不对设备进行shutdown操作。
+5、0005-pin-mem-fix-bug.patch
+修复pin 内存的bug。
