@@ -8,3 +8,5 @@
 重启时，不对设备进行shutdown操作。
 5、0005-pin-mem-fix-bug.patch
 修复pin 内存的bug。
+6、0006-hns3-reduce-netdev-up-time.patch
+提升网卡ready的速度。
