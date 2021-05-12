@@ -1,0 +1,33 @@
+From 89ad65f761ee39e266cc3f998c7a4a8b16edc88b Mon Sep 17 00:00:00 2001
+Date: Fri, 26 Mar 2021 11:28:07 +0000
+Subject: [PATCH 3/8] module: ignore version magic
+
+in order to use openEuler kernel modules
+
+---
+ kernel/module.c | 2 ++
+ 1 file changed, 2 insertions(+)
+
+diff --git a/kernel/module.c b/kernel/module.c
+index e20499309..4ec5ade80 100644
+--- a/kernel/module.c
++++ b/kernel/module.c
+@@ -3150,6 +3150,7 @@ static int check_modinfo(struct module *mod, struct load_info *info, int flags)
+ 	if (flags & MODULE_INIT_IGNORE_VERMAGIC)
+ 		modmagic = NULL;
+ 
++#if 0
+ 	/* This is allowed: modprobe --force will invalidate it. */
+ 	if (!modmagic) {
+ 		err = try_to_force_load(mod, "bad vermagic");
+@@ -3160,6 +3161,7 @@ static int check_modinfo(struct module *mod, struct load_info *info, int flags)
+ 		       info->name, modmagic, vermagic);
+ 		return -ENOEXEC;
+ 	}
++#endif
+ 
+ 	if (!get_modinfo(info, "intree")) {
+ 		if (!test_taint(TAINT_OOT_MODULE))
+-- 
+2.31.0
+

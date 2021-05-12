@@ -1,0 +1,25 @@
+From c3d4a974a0fbd3360307a58943b366cbf7c5ecb5 Mon Sep 17 00:00:00 2001
+Date: Sat, 27 Mar 2021 03:15:49 +0000
+Subject: [PATCH 4/8] kexec: ignore shutdown device
+
+to reduce shutdown time
+---
+ kernel/kexec_core.c | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/kernel/kexec_core.c b/kernel/kexec_core.c
+index 53137dfaa..4d1feb052 100644
+--- a/kernel/kexec_core.c
++++ b/kernel/kexec_core.c
+@@ -1173,7 +1173,7 @@ int kernel_kexec(void)
+ #endif
+ 	{
+ 		kexec_in_progress = true;
+-		kernel_restart_prepare(NULL);
++//		kernel_restart_prepare(NULL);
+ 		migrate_to_reboot_cpu();
+ 
+ 		/*
+-- 
+2.31.0
+

@@ -1,0 +1,106 @@
+From 4a7954aecef09aa5eaf7730904d676c0182f0475 Mon Sep 17 00:00:00 2001
+Date: Sat, 27 Mar 2021 07:35:51 +0000
+Subject: [PATCH 6/8] hns3: reduce netdev up time
+
+---
+ arch/arm64/configs/openeuler_defconfig               |  6 +++---
+ .../net/ethernet/hisilicon/hns3/hns3pf/hclge_main.c  |  2 +-
+ .../net/ethernet/hisilicon/hns3/hns3pf/hclge_mdio.c  | 12 ++++++++++++
+ drivers/net/phy/phy.c                                |  5 +++++
+ 4 files changed, 21 insertions(+), 4 deletions(-)
+
+diff --git a/arch/arm64/configs/openeuler_defconfig b/arch/arm64/configs/openeuler_defconfig
+index ea385a454..e5cc8ddb3 100644
+--- a/arch/arm64/configs/openeuler_defconfig
++++ b/arch/arm64/configs/openeuler_defconfig
+@@ -2632,11 +2632,11 @@ CONFIG_HNS_MDIO=m
+ CONFIG_HNS=m
+ CONFIG_HNS_DSAF=m
+ CONFIG_HNS_ENET=m
+-CONFIG_HNS3=m
+-CONFIG_HNS3_HCLGE=m
++CONFIG_HNS3=y
++CONFIG_HNS3_HCLGE=y
+ CONFIG_HNS3_DCB=y
+ CONFIG_HNS3_HCLGEVF=m
+-CONFIG_HNS3_ENET=m
++CONFIG_HNS3_ENET=y
+ CONFIG_NET_VENDOR_HUAWEI=y
+ CONFIG_HINIC=m
+ # CONFIG_NET_VENDOR_I825XX is not set
+diff --git a/drivers/net/ethernet/hisilicon/hns3/hns3pf/hclge_main.c b/drivers/net/ethernet/hisilicon/hns3/hns3pf/hclge_main.c
+index 4321132a4..af4b9d457 100644
+--- a/drivers/net/ethernet/hisilicon/hns3/hns3pf/hclge_main.c
++++ b/drivers/net/ethernet/hisilicon/hns3/hns3pf/hclge_main.c
+@@ -2818,7 +2818,7 @@ static int hclge_get_mac_phy_link(struct hclge_dev *hdev, int *link_status)
+ 	return hclge_get_mac_link_status(hdev, link_status);
+ }
+ 
+-static void hclge_update_link_status(struct hclge_dev *hdev)
++void hclge_update_link_status(struct hclge_dev *hdev)
+ {
+ 	struct hnae3_client *rclient = hdev->roce_client;
+ 	struct hnae3_client *client = hdev->nic_client;
+diff --git a/drivers/net/ethernet/hisilicon/hns3/hns3pf/hclge_mdio.c b/drivers/net/ethernet/hisilicon/hns3/hns3pf/hclge_mdio.c
+index e89820702..9d31ea2de 100644
+--- a/drivers/net/ethernet/hisilicon/hns3/hns3pf/hclge_mdio.c
++++ b/drivers/net/ethernet/hisilicon/hns3/hns3pf/hclge_mdio.c
+@@ -172,6 +172,8 @@ int hclge_mac_mdio_config(struct hclge_dev *hdev)
+ 	return 0;
+ }
+ 
++//extern void hclge_task_schedule(struct hclge_dev *, unsigned long);
++extern void hclge_update_link_status(struct hclge_dev *hdev);
+ static void hclge_mac_adjust_link(struct net_device *netdev)
+ {
+ 	struct hnae3_handle *h = *((void **)netdev_priv(netdev));
+@@ -179,6 +181,7 @@ static void hclge_mac_adjust_link(struct net_device *netdev)
+ 	struct hclge_dev *hdev = vport->back;
+ 	int duplex, speed;
+ 	int ret;
++	int i;
+ 
+ 	/* When phy link down, do nothing */
+ 	if (netdev->phydev->link == 0)
+@@ -194,6 +197,15 @@ static void hclge_mac_adjust_link(struct net_device *netdev)
+ 	ret = hclge_cfg_flowctrl(hdev);
+ 	if (ret)
+ 		netdev_err(netdev, "failed to configure flow control.\n");
++
++//	hclge_task_schedule(hdev, 0);
++//	hclge_update_link_status(hdev);
++	for (i = 0; i < 100; i++) {
++		hclge_update_link_status(hdev);
++		if (hdev->hw.mac.link == HCLGE_LINK_STATUS_UP)
++			break;
++		msleep(10);
++	}
+ }
+ 
+ int hclge_mac_connect_phy(struct hnae3_handle *handle)
+diff --git a/drivers/net/phy/phy.c b/drivers/net/phy/phy.c
+index 35525a671..12e3c8f11 100644
+--- a/drivers/net/phy/phy.c
++++ b/drivers/net/phy/phy.c
+@@ -1089,6 +1089,8 @@ EXPORT_SYMBOL(phy_stop);
+  */
+ void phy_start(struct phy_device *phydev)
+ {
++	int err = 0;
++
+ 	mutex_lock(&phydev->lock);
+ 
+ 	if (phydev->state != PHY_READY && phydev->state != PHY_HALTED) {
+@@ -1104,6 +1106,9 @@ void phy_start(struct phy_device *phydev)
+ 	__phy_resume(phydev);
+ 
+ 	phydev->state = PHY_UP;
++	err = phy_read_status(phydev);
++	if (!err && phydev->link)
++		phydev->state = PHY_NOLINK;
+ 
+ 	phy_start_machine(phydev);
+ out:
+-- 
+2.31.0
+

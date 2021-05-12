@@ -1,0 +1,24 @@
+From 61a042a7c5d91d1e31ae9915105b644102df3a30 Mon Sep 17 00:00:00 2001
+Date: Sat, 27 Mar 2021 07:35:17 +0000
+Subject: [PATCH 5/8] pin mem: fix bug
+
+---
+ mm/pin_mem.c | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/mm/pin_mem.c b/mm/pin_mem.c
+index f6729f1ce..e12b5ab10 100644
+--- a/mm/pin_mem.c
++++ b/mm/pin_mem.c
+@@ -303,7 +303,7 @@ bool check_redirect_end_valid(struct redirect_info *redirect_start,
+ 		max_redirect_page_num * sizeof(unsigned int));
+ 	if (redirect_end > redirect_space_start + redirect_space_size)
+ 		return false;
+-	return false;
++	return true;
+ }
+ 
+ static void reserve_user_space_map_pages(void)
+-- 
+2.31.0
+
