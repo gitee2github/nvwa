@@ -49,9 +49,13 @@ install -m 0750 %{_builddir}/%{name}-v%{version}/misc/%{name}-pre.sh %{buildroot
 install -m 0644 %{_builddir}/%{name}-v%{version}/misc/%{name}.service %{buildroot}/usr/lib/systemd/system
 install -m 0644 %{_builddir}/%{name}-v%{version}/misc/%{name}-pre.service %{buildroot}/usr/lib/systemd/system
 
+install -d $RPM_BUILD_ROOT/usr/share/bash-completion/completions
+install -p -m 0644 %{_builddir}/%{name}-v%{version}/completion/nvwa ${buildroot}/usr/share/bash-completion/completions/nvwa
+
 %post
 %systemd_post %{name}.service
 %systemd_post %{name}-pre.service
+source /usr/share/bash-completion/completions/nvwa
 
 %preun
 %systemd_preun %{name}.service

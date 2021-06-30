@@ -1,0 +1,61 @@
+#!/usr/bin/env bash
+
+_nvwa_nvwa() 
+{
+    local commands=(update init help)
+    local options=(--help -h --version -v)
+    
+    case "$prev" in
+        #todo.....
+    esac
+
+    case "$cur" in
+        -*)
+            COMPREPLY=( $( compgen -W "${options[*]}" -- "$cur" ) )
+            ;;
+        *)
+            COMPREPLY=( $( compgen -W "${commands[*]}" -- "$cur" ) )
+            ;;
+    esac
+}
+
+_nvwa_default() 
+{
+    COMPREPLY=( $( compgen -d -f -- $cur ) )
+}
+
+_nvwa_nvwa_update()
+{
+    local images_with_tag=()
+    case "$cur" in
+        *)
+            kernels=($(ls /boot/vmlinuz-* | cut -b 15-))
+            ;;
+    esac
+            
+    COMPREPLY=( $( compgen -W "${kernels[*]}" -- "$cur" ) )
+}
+
+_nvwa()
+{
+    COMPREPLY=()
+
+    local words=(${COMP_WORDS[*]})
+    local cword=$COMP_CWORD
+    local cur="${words[$cword]}"
+    local prev="${words[$cword-1]}"
+
+    local command='nvwa'
+    if [ $cword -gt 1 ] ; then
+        command="nvwa_${words[1]}"
+    fi
+    local completions_func=_nvwa_${command//-/_}
+    if declare -F $completions_func >/dev/null; then
+        $completions_func
+    else
+        _nvwa_default
+    fi
+    return 0
+}
+
+complete -F _nvwa nvwa
