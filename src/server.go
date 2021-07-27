@@ -212,7 +212,7 @@ func loadCmdline() (string, error) {
 }
 
 func getCriuExtPara() []string {
-	criuExtPara := []string{"--shell-job"}
+	criuExtPara := []string{"--shell-job", "--enable-external-masters"}
 
 	enablePM := nvwaRestoreConfig.GetBool("enable_pin_memory")
 	if enablePM {
