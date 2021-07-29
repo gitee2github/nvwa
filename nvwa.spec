@@ -1,6 +1,10 @@
+# This is only an example for nvwa.spec
+# So it only contains necessary items for rpmbuild,
+# except Release, changelogs and so on.
+
 Name:           nvwa
 Version:        0.1
-Release:        2
+Release:        1%{?dist}
 Summary:        a tool used for openEuler kernel update
 
 License:        MulanPSL-2.0 and Apache-2.0 and MIT and MPL-2.0
@@ -78,7 +82,5 @@ source /usr/share/bash-completion/completions/nvwa
 %{_bindir}/%{name}-pre.sh
 
 %changelog
-* Wed 17 Mar 2021 anatasluo <luolongjun@huawei.com>
-- Update to 0.1-r2
-* Thu Feb 18 2021 anatasluo <luolongjun@huawei.com>
-- Update to 0.0.1
+* Wed 17 Mar 2021 xxxxxx <xxxxxx@xxxx.com>
+- Xxxxxxx
