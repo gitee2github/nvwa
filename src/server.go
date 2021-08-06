@@ -50,6 +50,25 @@ func overrideConf(path string, content string) error {
 	return nil
 }
 
+func getSystemdOptions(service string, option string) (error, string) {
+	return runCmd("systemctl", []string{"show", "--property",
+		option, "--value", service}, nil, nil, nil)
+}
+
+func getPIDFile(service string) (error, string) {
+	err, ret := getSystemdOptions(service, "PIDFile")
+	if err != nil {
+		log.Errorf("Unable to get pid file for service %s\n", service)
+		log.Errorf("Error is %s \n", err)
+		return err, ""
+	}
+
+	log.Debugf("Get pid file for %s - %s \n", service, ret)
+
+	i := strings.Index(ret, "=")
+	return nil, ret[i+1:]
+}
+
 func overrideSystemctl(service string, pid int) error {
 	systemdEtc := nvwaSeverConfig.GetString("systemd_etc")
 
@@ -59,7 +78,17 @@ func overrideSystemctl(service string, pid int) error {
 	content := "[Service]\nExecStart=\nExecStart="
 	content += "nvwa restore " + service + " " + strconv.Itoa(pid) + "\n"
 	content += "User=root\nGroup=root\n"
-	err := overrideConf(path.Join(systemdDir, "nvwa_override_exec.conf"), content)
+
+	err, pidfile := getPIDFile(service)
+	if err != nil {
+		return err
+	}
+
+	pidfile = strings.TrimSpace(pidfile)
+	if pidfile != "" {
+		content += "ExecStartPost=/usr/bin/echo " + strconv.Itoa(pid) + " > " + pidfile + "\n"
+	}
+	err = overrideConf(path.Join(systemdDir, "nvwa_override_exec.conf"), content)
 	if err != nil {
 		return err
 	}
@@ -118,8 +147,7 @@ func findPids(criuPids map[string]int) error {
 
 	services := nvwaRestoreConfig.GetStringSlice("services")
 	for _, val := range services {
-		err, tmpRet := runCmd("systemctl", []string{"show", "--property",
-			"MainPID", "--value", val}, nil, nil, nil)
+		err, tmpRet := getSystemdOptions(val, "MainPID")
 		if err != nil {
 			log.Errorf("Unable to get pid for service %s\n", val)
 			log.Errorf("Error is %s \n", err)
