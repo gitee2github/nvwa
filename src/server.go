@@ -76,19 +76,10 @@ func overrideSystemctl(service string, pid int) error {
 	_ = os.Mkdir(systemdDir, 0700)
 
 	content := "[Service]\nExecStart=\nExecStart="
-	content += "nvwa restore " + service + " " + strconv.Itoa(pid) + "\n"
+	content += "nvwa restore " + service + "@" + strconv.Itoa(pid) + "\n"
 	content += "User=root\nGroup=root\n"
 
-	err, pidfile := getPIDFile(service)
-	if err != nil {
-		return err
-	}
-
-	pidfile = strings.TrimSpace(pidfile)
-	if pidfile != "" {
-		content += "ExecStartPost=/usr/bin/echo " + strconv.Itoa(pid) + " > " + pidfile + "\n"
-	}
-	err = overrideConf(path.Join(systemdDir, "nvwa_override_exec.conf"), content)
+	err := overrideConf(path.Join(systemdDir, "nvwa_override_exec.conf"), content)
 	if err != nil {
 		return err
 	}
@@ -384,11 +375,27 @@ func loadConfig() {
 	readConfig(nvwaRestoreConfig, "nvwa-restore")
 }
 
-func RestoreService(service string) int {
+func RestoreService(cmd string) int {
+	i := strings.Index(cmd, "@")
+	service := cmd[:i]
+	pid := cmd[i+1:]
+
+	log.Debugf("nvwa restore %s %s \n", service, pid)
+
 	criuExe := nvwaSeverConfig.GetString("criu_exe")
 	criuDir := nvwaSeverConfig.GetString("criu_dir")
 
-	err, _ := runCmd(criuExe, getCriuPara("restore", path.Join(criuDir, service), ""),
+	err, pidfile := getPIDFile(service)
+	if err != nil {
+		return -1
+	}
+	pidfile = strings.TrimSpace(pidfile)
+	if pidfile != "" {
+		pidData := []byte(pid)
+		_ = ioutil.WriteFile(pidfile, pidData, 0644)
+	}
+
+	err, _ = runCmd(criuExe, getCriuPara("restore", path.Join(criuDir, service), ""),
 		os.Stdin, os.Stdout, os.Stderr)
 	if err != nil {
 		log.Errorf("Restore %s failed, error is %s \n", service, err)
@@ -463,7 +470,10 @@ func ExitServer(msg string) int {
 func may_init_socket(path string) error {
 	socketDir := filepath.Dir(path)
 	log.Debugf("Socket directory %s \n", socketDir)
-	return os.Mkdir(socketDir, 0700)
+	if _, err := os.Stat(socketDir); os.IsNotExist(err) {
+		return os.Mkdir(socketDir, 0700)
+	}
+	return nil
 }
 
 func runServer(path string) {
