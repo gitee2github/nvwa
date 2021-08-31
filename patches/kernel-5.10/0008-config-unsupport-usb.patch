@@ -1,0 +1,26 @@
+From 3a8861052e800b4c1d8077a5af19f018d0926e9f Mon Sep 17 00:00:00 2001
+From: "hewenlinag" <hewenliang4@huawei.com>
+Date: Tue, 30 Mar 2021 13:16:58 +0000
+Subject: [PATCH 8/8] config: unsupport usb
+
+to reduce boot time
+---
+ arch/arm64/configs/openeuler_defconfig | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/arch/arm64/configs/openeuler_defconfig b/arch/arm64/configs/openeuler_defconfig
+index e5cc8ddb3..debc009e3 100644
+--- a/arch/arm64/configs/openeuler_defconfig
++++ b/arch/arm64/configs/openeuler_defconfig
+@@ -5062,7 +5062,7 @@ CONFIG_I2C_HID=m
+ # end of HID support
+ 
+ CONFIG_USB_OHCI_LITTLE_ENDIAN=y
+-CONFIG_USB_SUPPORT=y
++CONFIG_USB_SUPPORT=n
+ CONFIG_USB_COMMON=y
+ CONFIG_USB_LED_TRIG=y
+ CONFIG_USB_ULPI_BUS=m
+-- 
+2.31.0
+
