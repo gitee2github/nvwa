@@ -1,0 +1,27 @@
+From 58151366f9ca9dc7672d39b21c4053c07f90ed5a Mon Sep 17 00:00:00 2001
+From: "hewenliang" <hewenliang4@huawei.com>
+Date: Tue, 30 Mar 2021 12:51:42 +0000
+Subject: [PATCH 7/8] kexec: permit kexec reserved memory to use 4G above
+ address
+
+Signed-off-by: hewenliang <hewenliang4@huawei.com>
+---
+ arch/arm64/mm/init.c | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/arch/arm64/mm/init.c b/arch/arm64/mm/init.c
+index c3a4366bd..8ecc42904 100644
+--- a/arch/arm64/mm/init.c
++++ b/arch/arm64/mm/init.c
+@@ -213,7 +213,7 @@ static void __init reserve_quick_kexec(void)
+ 		return;
+ 
+ 	/* Current arm64 boot protocol requires 2MB alignment */
+-	mem_start = memblock_find_in_range(0, arm64_dma32_phys_limit,
++	mem_start = memblock_find_in_range(0, MEMBLOCK_ALLOC_ACCESSIBLE,
+ 			mem_len, SZ_2M);
+ 	if (mem_start == 0) {
+ 		pr_warn("cannot allocate quick kexec mem (size:0x%llx)\n",
+-- 
+2.31.0
+

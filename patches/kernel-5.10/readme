@@ -10,3 +10,7 @@
 修复pin 内存的bug。
 6、0006-hns3-reduce-netdev-up-time.patch
 提升网卡ready的速度。
+7、0007-kexec-permit-kexec-reserved-memory-to-use-4G-above-a.patch
+使用4G以上内存空间。
+8、0008-config-unsupport-usb.patch
+去除usb功能。
