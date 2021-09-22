@@ -1,0 +1,10 @@
+#!/bin/sh
+set -e
+
+case "$1" in
+    remove|deconfigure|failed-upgrade)
+	systemctl --no-reload disable nvwa.service > /dev/null 2>&1
+	systemctl --no-reload disable nvwa-pre.service > /dev/null 2>&1
+	systemctl stop nvwa.service >/dev/null 2>&1
+        ;;
+esac

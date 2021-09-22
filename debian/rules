@@ -1,0 +1,43 @@
+#!/usr/bin/make -f
+# See debhelper(7) (uncomment to enable)
+# output every command that modifies files on the build system.
+#export DH_VERBOSE = 1
+
+# see FEATURE AREAS in dpkg-buildflags(1)
+#export DEB_BUILD_MAINT_OPTIONS = hardening=+all
+
+# see ENVIRONMENT in dpkg-buildflags(1)
+# package maintainers to append CFLAGS
+#export DEB_CFLAGS_MAINT_APPEND  = -Wall -pedantic
+# package maintainers to append LDFLAGS
+#export DEB_LDFLAGS_MAINT_APPEND = -Wl,--as-needed
+
+
+%:
+	dh $@
+override_dh_auto_build:
+	$(shell cd ./src; go build -mod=vendor -buildmode=pie -o ../nvwa; cd ../)
+	gcc tools/nvwa-pin.c -o nvwa-pin -fstack-protector-all -fPIE -pie -Wl,-z,noexecstack,-z,relo,-z,now
+override_dh_auto_install:
+	install -d debian/nvwa/usr/bin
+	install -d debian/nvwa/etc/nvwa
+	install -d debian/nvwa/etc/nvwa/log
+	install -d debian/nvwa/usr/lib/systemd/system
+	install -d debian/nvwa/var/nvwa
+	install -d debian/nvwa/var/nvwa/running
+	install -m 0750 nvwa debian/nvwa/usr/bin
+	install -m 0750 nvwa-pin debian/nvwa/usr/bin
+	install -m 0640 config/nvwa-restore.yaml debian/nvwa/etc/nvwa/
+	install -m 0640 config/nvwa-server.yaml debian/nvwa/etc/nvwa/
+	install -m 0750 misc/nvwa-pre.sh  debian/nvwa/usr/bin
+	install -m 0644 misc/nvwa.service debian/nvwa/usr/lib/systemd/system
+	install -m 0644 misc/nvwa-pre.service debian/nvwa/usr/lib/systemd/system
+
+override_dh_auto_clean:
+	-rm nvwa nvwa-pin
+	dh_auto_clean
+# dh_make generated override targets
+# This is example for Cmake (See https://bugs.debian.org/641051 )
+#override_dh_auto_configure:
+#	dh_auto_configure -- #	-DCMAKE_LIBRARY_PATH=$(DEB_HOST_MULTIARCH)
+
