@@ -385,6 +385,11 @@ func RestoreService(cmd string) int {
 	criuExe := nvwaSeverConfig.GetString("criu_exe")
 	criuDir := nvwaSeverConfig.GetString("criu_dir")
 
+	enbale_debug_mode := nvwaRestoreConfig.GetBool("enbale_debug_mode")
+	if enbale_debug_mode {
+		log.SetLevel(log.DebugLevel)
+	}
+
 	err, pidfile := getPIDFile(service)
 	if err != nil {
 		return -1
@@ -403,7 +408,9 @@ func RestoreService(cmd string) int {
 	}
 	log.Debugf("Restore service %s successfully \n", service)
 	removeOverrideSystemctl(service)
-	removeCriuImage(service)
+	if !enbale_debug_mode {
+		removeCriuImage(service)
+	}
 	return 0
 }
 
@@ -413,6 +420,11 @@ func restoreProcess() {
 	success := 0
 	criuDir := nvwaSeverConfig.GetString("criu_dir")
 	criuExe := nvwaSeverConfig.GetString("criu_exe")
+
+	enbale_debug_mode := nvwaRestoreConfig.GetBool("enbale_debug_mode")
+	if enbale_debug_mode {
+		log.SetLevel(log.DebugLevel)
+	}
 
 	enableNet := nvwaRestoreConfig.GetBool("restore_net")
 	if enableNet {
@@ -438,7 +450,7 @@ func restoreProcess() {
 	if success < total {
 		log.Debugf("Some process(es) restore failed,\n" +
 			"check nvwa log and init enviroment before next trial")
-	} else {
+	} else if !enbale_debug_mode {
 		removeProcessImg()
 	}
 	return
@@ -524,7 +536,7 @@ func clearServer(socketPath string) {
 }
 
 func startServer(socketPath string) {
-	log.SetLevel(log.DebugLevel)
+	log.SetLevel(log.WarnLevel)
 	exitServer = make(chan bool)
 
 	loadConfig()
