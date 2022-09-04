@@ -5,6 +5,7 @@ import (
 	"io/ioutil"
 	"net"
 	"os"
+	"os/signal"
 	"path"
 	"path/filepath"
 	"reflect"
@@ -12,6 +13,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"syscall"
 
 	"github.com/fsnotify/fsnotify"
 	log "github.com/sirupsen/logrus"
@@ -20,7 +22,7 @@ import (
 
 type rpmFunc func(string) int
 
-var exitServer chan bool
+var exitServer chan os.Signal
 var rpmList = map[string]rpmFunc{}
 var nvwaSeverConfig *viper.Viper
 var nvwaRestoreConfig *viper.Viper
@@ -474,7 +476,7 @@ func handleCMD(cmd string) int {
 }
 
 func ExitServer(msg string) int {
-	exitServer <- true
+	exitServer <- syscall.SIGINT
 	log.Debugf("Server will exit \n")
 	return 0
 }
@@ -512,23 +514,25 @@ func runServer(path string) {
 		log.Fatal(err)
 	}
 
-	for {
-		conn, err := l.AcceptUnix()
-		if err != nil {
-			log.Fatal(err)
+	go func() {
+		for {
+			conn, err := l.AcceptUnix()
+			if err != nil {
+				log.Fatal(err)
+			}
+			var buf [1024]byte
+			n, err := conn.Read(buf[:])
+			if err != nil {
+				log.Fatal(err)
+			}
+			ret := handleCMD(string(buf[:n]))
+			_, err = conn.Write([]byte(strconv.Itoa(ret)))
+			if err != nil {
+				log.Fatal(err)
+			}
+			conn.Close()
 		}
-		var buf [1024]byte
-		n, err := conn.Read(buf[:])
-		if err != nil {
-			log.Fatal(err)
-		}
-		ret := handleCMD(string(buf[:n]))
-		_, err = conn.Write([]byte(strconv.Itoa(ret)))
-		if err != nil {
-			log.Fatal(err)
-		}
-		conn.Close()
-	}
+	}()
 }
 
 func clearServer(socketPath string) {
@@ -537,10 +541,11 @@ func clearServer(socketPath string) {
 
 func startServer(socketPath string) {
 	log.SetLevel(log.WarnLevel)
-	exitServer = make(chan bool)
+	exitServer = make(chan os.Signal)
+	signal.Notify(exitServer, os.Interrupt, syscall.SIGTERM)
 
 	loadConfig()
-	go runServer(socketPath)
+	runServer(socketPath)
 	NotifySytemd()
 	go restoreProcess()
 	log.Debugf("Server is listening in %s \n", socketPath)
