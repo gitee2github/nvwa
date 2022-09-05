@@ -1,7 +1,7 @@
 [Unit]
 Description=NVWA server
-After=network-online.target nvwa-pre.service
-Requires=network-online.target nvwa-pre.service
+After=NetworkManager-wait-online.service network-online.target nvwa-pre.service
+Requires=NetworkManager-wait-online.service network-online.target nvwa-pre.service
 
 [Service]
 ExecStart=/usr/bin/nvwa -server 1
