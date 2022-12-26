@@ -79,7 +79,7 @@ func startClient(path string) {
 					if ret != 0 {
 						handleRet("restore", ret)
 					}
-					RestoreMainPid(c.Args().Get(1))
+					RestoreMainPid(c.Args().First())
 					NotifySytemd()
 					SystemdReload()
 					return nil
